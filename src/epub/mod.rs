@@ -3,10 +3,12 @@
 use std::fs::{self, File};
 use std::io;
 use std::path::Path;
-use zip::ZipArchive;
+use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
-pub fn unzip_epub_from_path(epub_path: &str, output_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
-
+pub fn unzip_epub_from_path(
+    epub_path: &str,
+    output_dir: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Open Epub file
     let file = File::open(epub_path)?;
 
@@ -29,11 +31,10 @@ pub fn unzip_epub_from_path(epub_path: &str, output_dir: &str) -> Result<(), Box
                 if !parent.exists() {
                     fs::create_dir_all(parent)?;
                 }
-        }
+            }
             let mut outfile = File::create(&outpath)?;
             io::copy(&mut file, &mut outfile)?;
         }
     }
     Ok(())
-
 }
