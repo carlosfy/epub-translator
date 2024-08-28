@@ -8,3 +8,5 @@ license = "MIT"
 
 [dependencies]
 zip = "0.6"
+walkdir = "2.3.3"
+
