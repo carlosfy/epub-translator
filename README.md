@@ -34,6 +34,8 @@ ARGS:
 OPTIONS:
     -s, --source-lang <LANG>    Source language code (optional, auto-detect if not provided)
     -p, --parallel <NUM>        Number of parallel translation requests (default: 4)
+    -k, --api-key <KEY> DeepL API key (optional, defaults to DEEPL_API_KEY environment variable)
+    -h, --help --help Display usage information
 ```
 
 ## Development Status
