@@ -47,3 +47,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgements
 
 This project uses the DeepL API for translations. Please ensure you comply with DeepL's terms of service when using this tool.
+
+## Resources
+- EPUBCheck: https://github.com/w3c/epubcheck
+- EPUB 3.3 Specs: https://www.w3.org/TR/epub-33/
+- Docker image for EPUBCheck: https://hub.docker.com/repository/docker/carlosfy/epubcheck/general
