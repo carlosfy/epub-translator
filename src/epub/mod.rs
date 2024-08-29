@@ -2,7 +2,7 @@
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
@@ -47,7 +47,22 @@ pub fn zip_folder_to_epub(
     let epub_file = File::create(epub_path)?;
     let mut zip = ZipWriter::new(epub_file);
 
-    let options = FileOptions::default()
+    // Add mimetype file first, withtout compression
+    let stored_options = FileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored)
+        .unix_permissions(0o644);
+
+    let mimetype_path = PathBuf::from(folder_path).join("mimetype");
+    if mimetype_path.exists() {
+        zip.start_file("mimetype", stored_options)?;
+        let mut mimetype_file = File::open(mimetype_path)?;
+        let mut buffer = Vec::new();
+        mimetype_file.read_to_end(&mut buffer)?;
+        zip.write_all(&buffer)?;
+    }
+
+    // Add the rest of the files with compression
+    let deflated_options = FileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
         .unix_permissions(0o755);
 
@@ -57,14 +72,18 @@ pub fn zip_folder_to_epub(
         let path = entry.path();
         let name = path.strip_prefix(Path::new(folder_path))?.to_str().unwrap();
 
+        if name == "mimetype" {
+            continue;
+        }
+
         if path.is_file() {
-            zip.start_file(name, options)?;
+            zip.start_file(name, deflated_options)?;
             let mut file = File::open(path)?;
             let mut buffer = Vec::new();
             file.read_to_end(&mut buffer)?;
             zip.write_all(&buffer)?;
         } else if !name.is_empty() {
-            zip.add_directory(name, options)?;
+            zip.add_directory(name, deflated_options)?;
         }
     }
 
