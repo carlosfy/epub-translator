@@ -4,6 +4,7 @@ use std::error::Error;
 
 pub const DEEPL_FREE_API_URL: &str = "https://api-free.deepl.com/v2";
 pub const DEEPL_PRO_API_URL: &str = "https://api.deepl.com/v2";
+pub const DEEPL_MOCK_API_URL: &str = "http://127.0.0.1:3030";
 
 pub const DEEPL_TRANSLATE_PATH: &str = "/translate";
 pub const DEEPL_USAGE_PATH: &str = "/usage";
