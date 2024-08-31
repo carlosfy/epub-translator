@@ -4,22 +4,23 @@ use std::error::Error;
 
 pub const DEEPL_FREE_API_URL: &str = "https://api-free.deepl.com/v2";
 pub const DEEPL_PRO_API_URL: &str = "https://api.deepl.com/v2";
+pub const DEEPL_MOCK_API_URL: &str = "http://127.0.0.1:3030";
 
 pub const DEEPL_TRANSLATE_PATH: &str = "/translate";
 pub const DEEPL_USAGE_PATH: &str = "/usage";
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TranslationRequest {
     pub text: Vec<String>,
     pub target_lang: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TranslationResponse {
     pub translations: Vec<Translation>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Translation {
     pub detected_source_language: String,
     pub text: String,
@@ -27,8 +28,8 @@ pub struct Translation {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UsageResponse {
-    character_count: u64,
-    character_limit: u64,
+    pub character_count: u64,
+    pub character_limit: u64,
 }
 
 #[derive(Debug)]
