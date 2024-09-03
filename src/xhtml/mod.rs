@@ -9,9 +9,13 @@ use html5ever::{parse_document, serialize};
 use markup5ever_rcdom::SerializableHandle;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
-pub fn iterate_text_nodes(
+use tokio::task;
+use tokio::task::JoinHandle;
+
+pub async fn iterate_text_nodes(
     file_path: &str,
     output_file: &str,
+    text_modifier: impl Fn(String) -> JoinHandle<String> + Send + Sync + 'static,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Read the file content
     let mut file = File::open(file_path)?;
@@ -23,7 +27,7 @@ pub fn iterate_text_nodes(
         .read_from(&mut content.as_bytes())?;
 
     // Modify text nodes
-    walk(&dom.document);
+    walk(&dom.document, &text_modifier).await;
 
     let mut output = Vec::new();
     let opts = SerializeOpts {
@@ -44,7 +48,10 @@ pub fn iterate_text_nodes(
     Ok(())
 }
 
-fn walk(handle: &Handle) {
+async fn walk(
+    handle: &Handle,
+    text_modifier: &(impl Fn(String) -> JoinHandle<String> + Send + Sync),
+) {
     // Modify text nodes
     if let NodeData::Text { contents } = &handle.data {
         let mut text = contents.borrow_mut();
@@ -59,8 +66,41 @@ fn walk(handle: &Handle) {
         NodeData::Element { ref name, .. } if name.local.as_ref() == "style" => {}
         _ => {
             for child in handle.children.borrow().iter() {
-                walk(child);
+                Box::pin(walk(child, text_modifier)).await;
             }
         }
+    }
+}
+
+async fn simple_text_modifier(text: String) -> String {
+    format!("Text({})EndText", text)
+}
+
+pub fn simple_text_modifier_handle(text: String) -> JoinHandle<String> {
+    task::spawn(simple_text_modifier(text))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[tokio::test]
+    async fn test_iterate_text_nodes() -> Result<(), Box<dyn std::error::Error>> {
+        let input_file = "tests/data/lorem.xhtml";
+        let output_file = "temp/lorem_processed.xhtml";
+        let expected_file = "tests/data/lorem_expected.xhtml";
+
+        // Process the input file
+        iterate_text_nodes(input_file, output_file, simple_text_modifier_handle).await?;
+
+        let processed_content = fs::read_to_string(output_file)?;
+        let expected_content = fs::read_to_string(expected_file)?;
+
+        assert_eq!(processed_content, expected_content);
+
+        fs::remove_file(output_file)?;
+
+        Ok(())
     }
 }
