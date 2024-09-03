@@ -6,6 +6,33 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
+// Get an operator over all the xhtml files in the epub folder
+pub fn get_xhtml_paths(
+    epub_path: &str,
+) -> Result<impl Iterator<Item = String>, Box<dyn std::error::Error>> {
+    let path = PathBuf::from(epub_path);
+    if !path.exists() || !path.is_dir() {
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "The path is not a directory or does not exist",
+        )));
+    }
+
+    let walker = WalkDir::new(epub_path).into_iter();
+    let xhtml_files = walker
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .map(|ext| ext == "xhtml" || ext == "html")
+                .unwrap_or(false)
+        })
+        .filter_map(|entry| entry.path().to_str().map(|s| s.to_string()));
+
+    Ok(xhtml_files)
+}
+
 pub fn unzip_epub_from_path(
     epub_path: &str,
     output_dir: &str,
@@ -135,45 +162,12 @@ mod tests {
             ])
             .output()?;
 
-        // Check if EpubCheck was successful
+        // Check if EpubCheck was successful, needs to be logged in docker.
         assert!(
             output.status.success(),
             "EpubCheck failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-
-        Ok(())
-    }
-
-    // This test is not working, probably because the zip is noisy.
-    // TODO: Do the same test but compare the inner contents of the epub.
-    // I'll do this after implementing some way to traverse all the text nodes of the epub.
-    // #[test]
-    fn test_unzip_epub_from_path() -> Result<(), Box<dyn std::error::Error>> {
-        // Find the first EPUB file in tests/data
-        let test_data_dir = PathBuf::from("tests/data");
-        let input_epub_path = find_first_epub(&test_data_dir)
-            .expect("There should be an EPUB file in tests/data for the test to pass");
-
-        // Create a temporary directory for the test
-        let temp_dir = tempdir()?;
-        let extracted_dir = temp_dir.path().join("extracted");
-        let output_epub_path = temp_dir.path().join("output.epub");
-
-        // Unzip the EPUB file
-        unzip_epub_from_path(
-            input_epub_path.to_str().unwrap(),
-            extracted_dir.to_str().unwrap(),
-        )?;
-
-        // Zip the extracted folder back to EPUB
-        zip_folder_to_epub(
-            extracted_dir.to_str().unwrap(),
-            output_epub_path.to_str().unwrap(),
-        )?;
-
-        //Compare the contents of both EPUB files
-        assert!(compare_epub_files(&input_epub_path, &output_epub_path)?);
 
         Ok(())
     }
@@ -186,37 +180,11 @@ mod tests {
             .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("epub"))
     }
 
-    // This function is not working, probably because the zip is noisy.
-    // TODO: Do the same test but compare the inner contents of the epub.
-    fn compare_epub_files(
-        path1: &PathBuf,
-        path2: &PathBuf,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
-        let mut archive1 = ZipArchive::new(File::open(path1)?)?;
-        let mut archive2 = ZipArchive::new(File::open(path2)?)?;
-
-        if archive1.len() != archive2.len() {
-            return Ok(false);
-        }
-
-        for i in 0..archive1.len() {
-            let mut file1 = archive1.by_index(i)?;
-            let mut file2 = archive2.by_index(i)?;
-
-            if file1.name() != file2.name() {
-                return Ok(false);
-            }
-
-            let mut content1 = Vec::new();
-            let mut content2 = Vec::new();
-            file1.read_to_end(&mut content1)?;
-            file2.read_to_end(&mut content2)?;
-
-            if content1 != content2 {
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
+    #[test]
+    fn test_get_xhtml_paths() -> Result<(), Box<dyn std::error::Error>> {
+        let test_data_dir = "tests/data/epub_folder";
+        let xhtml_files = get_xhtml_paths(&test_data_dir)?;
+        assert_eq!(xhtml_files.count(), 10);
+        Ok(())
     }
 }
