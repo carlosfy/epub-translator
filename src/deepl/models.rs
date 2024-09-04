@@ -8,6 +8,7 @@ pub const DEEPL_MOCK_API_URL: &str = "http://127.0.0.1:3030";
 
 pub const DEEPL_TRANSLATE_PATH: &str = "/translate";
 pub const DEEPL_USAGE_PATH: &str = "/usage";
+pub const DEEPL_LANGUAGES_PATH: &str = "/languages";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TranslationRequest {
@@ -69,3 +70,13 @@ impl DeepLConfiguration {
         Ok(response.status().is_success())
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Language {
+    language: String,
+    name: String,
+    supports_formality: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LanguagesResponse(pub Vec<Language>);

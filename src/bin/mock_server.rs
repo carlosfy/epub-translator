@@ -6,7 +6,9 @@ use tokio::signal;
 // Use Ctrl+C to stop the server.
 #[tokio::main]
 async fn main() {
-    let shutdown_signal = deepl::run_mock_server().await;
+    let shutdown_signal = deepl::run_mock_server()
+        .await
+        .expect("Failed to create mock server");
 
     // Wait for a Ctrl+C signal to initiate shutdown
     signal::ctrl_c()
