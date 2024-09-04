@@ -24,7 +24,10 @@ pub async fn translate(
     text: &str,
     target_lang: &str,
 ) -> Result<String, Box<dyn Error>> {
-    println!("Translating text: {} to {}", text, target_lang);
+    eprintln!(
+        "[MOCK SERVER] Translating text: {} to {}",
+        text, target_lang
+    );
     let client = Client::new();
 
     let body = TranslationRequest {
@@ -47,7 +50,7 @@ pub async fn translate(
 
 // usage.sh
 pub async fn get_usage(config: &DeepLConfiguration) -> Result<UsageResponse, Box<dyn Error>> {
-    println!("Getting usage from {}", config.api_url);
+    eprintln!("[MOCK SERVER] Getting usage from {}", config.api_url);
     let client = Client::new();
 
     let request = client
@@ -66,7 +69,7 @@ pub async fn get_usage(config: &DeepLConfiguration) -> Result<UsageResponse, Box
 pub async fn get_languages(
     config: &DeepLConfiguration,
 ) -> Result<LanguagesResponse, Box<dyn Error>> {
-    println!("Getting languages from {}", config.api_url);
+    eprintln!("[MOCK SERVER] Getting languages from {}", config.api_url);
     let client = Client::new();
 
     let request = client
@@ -93,7 +96,10 @@ pub async fn run_mock_server() -> Result<oneshot::Sender<()>, Box<dyn std::error
         .and(warp::path("translate"))
         .and(warp::body::json::<TranslationRequest>())
         .map(|translation_request: TranslationRequest| {
-            println!("Mock Server:Translation request {:?}", translation_request);
+            eprintln!(
+                "[MOCK SERVER] Translation request {:?}",
+                translation_request
+            );
 
             let response = TranslationResponse {
                 translations: vec![Translation {
@@ -113,7 +119,7 @@ pub async fn run_mock_server() -> Result<oneshot::Sender<()>, Box<dyn std::error
         .and(warp::path("v2"))
         .and(warp::path("usage"))
         .map(|| {
-            println!("Mock Server: Usage request");
+            eprintln!("[MOCK SERVER]  Usage request");
             let usage_response = UsageResponse {
                 character_count: 1000,
                 character_limit: 500000,
@@ -133,7 +139,7 @@ pub async fn run_mock_server() -> Result<oneshot::Sender<()>, Box<dyn std::error
         .and(warp::path("languages"))
         .and(warp::query::<HashMap<String, String>>())
         .map(move |params: HashMap<String, String>| {
-            println!("Mock Server: Languages request");
+            eprintln!("[MOCK SERVER] Languages request");
 
             let type_param = params.get("type");
 
@@ -149,7 +155,7 @@ pub async fn run_mock_server() -> Result<oneshot::Sender<()>, Box<dyn std::error
     let (tx, rx) = oneshot::channel();
 
     tokio::spawn(async move {
-        println!("Mock Server running on {}", DEEPL_MOCK_API_URL);
+        eprintln!("[MOCK SERVER] Starting server on {}", DEEPL_MOCK_API_URL);
         let (_, server) = warp::serve(routes).bind_with_graceful_shutdown(addr, async {
             rx.await.ok();
         });

@@ -1,6 +1,6 @@
 use epub_translator::deepl::models::DeepLConfiguration;
 use epub_translator::deepl::{get_languages, get_test_config, get_usage, run_mock_server};
-use epub_translator::translate_epub;
+use epub_translator::{count_epub_char, translate_epub};
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -69,8 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("Error creating DeepL configuration")
     };
 
-    // If test check if mock server is running
-
+    // If test then start mock server
     let shutdown_mock_server_signal = if args.test {
         println!("Starting mock server for test mode...");
         match run_mock_server().await {
@@ -114,6 +113,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .join(", ")
         );
         std::process::exit(1);
+    }
+
+    println!("       -----------        ");
+
+    // Count the number of characters to translate
+    let char_count = count_epub_char(&args.input_file)?;
+    println!("Number of characters to translate: {}", char_count);
+
+    let usage = get_usage(&config).await?;
+
+    // Show user the usage and the char count
+    println!(
+        "Usage: {}, limit: {}",
+        &usage.character_count, &usage.character_limit
+    );
+    println!("Number of characters to translate: {}", char_count);
+
+    // Ask for user confirmation
+    println!("Do you want to proceed with the translation? (y/n)");
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    if input.trim().to_lowercase() != "y" {
+        println!("Translation cancelled by user.");
+        std::process::exit(0);
     }
 
     match translate_epub(
