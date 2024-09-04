@@ -1,5 +1,3 @@
-// The EPUB module is responsible for zipping and unzipping EPUB files.
-
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -8,17 +6,16 @@ use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 // Get an operator over all the xhtml files in the epub folder
 pub fn get_xhtml_paths(
-    epub_path: &str,
+    epub_folder_path: &Path,
 ) -> Result<impl Iterator<Item = String>, Box<dyn std::error::Error>> {
-    let path = PathBuf::from(epub_path);
-    if !path.exists() || !path.is_dir() {
+    if !epub_folder_path.exists() || !epub_folder_path.is_dir() {
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "The path is not a directory or does not exist",
         )));
     }
 
-    let walker = WalkDir::new(epub_path).into_iter();
+    let walker = WalkDir::new(epub_folder_path).into_iter();
     let xhtml_files = walker
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
@@ -34,8 +31,8 @@ pub fn get_xhtml_paths(
 }
 
 pub fn unzip_epub_from_path(
-    epub_path: &str,
-    output_dir: &str,
+    epub_path: &Path,
+    output_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Open Epub file
     let file = File::open(epub_path)?;
@@ -46,10 +43,13 @@ pub fn unzip_epub_from_path(
     // Open the ZIP archive
     let mut archive = ZipArchive::new(file)?;
 
+    // Create a PathBuf for the output directory
+    let output_path_buf = PathBuf::from(output_dir);
+
     // Extract all files
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
-        let outpath = Path::new(output_dir).join(file.name());
+        let outpath = output_path_buf.join(file.name());
 
         if file.name().ends_with('/') {
             fs::create_dir_all(&outpath)?;
@@ -68,8 +68,8 @@ pub fn unzip_epub_from_path(
 }
 
 pub fn zip_folder_to_epub(
-    folder_path: &str,
-    epub_path: &str,
+    folder_path: &Path,
+    epub_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let epub_file = File::create(epub_path)?;
     let mut zip = ZipWriter::new(epub_file);
@@ -79,7 +79,7 @@ pub fn zip_folder_to_epub(
         .compression_method(zip::CompressionMethod::Stored)
         .unix_permissions(0o644);
 
-    let mimetype_path = PathBuf::from(folder_path).join("mimetype");
+    let mimetype_path = folder_path.join("mimetype");
     if mimetype_path.exists() {
         zip.start_file("mimetype", stored_options)?;
         let mut mimetype_file = File::open(mimetype_path)?;
@@ -97,7 +97,7 @@ pub fn zip_folder_to_epub(
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        let name = path.strip_prefix(Path::new(folder_path))?.to_str().unwrap();
+        let name = path.strip_prefix(folder_path)?.to_str().unwrap();
 
         if name == "mimetype" {
             continue;
@@ -130,33 +130,28 @@ mod tests {
     // https://github.com/w3c/epubcheck
     #[test]
     fn test_correctness_after_unzip_and_zip() -> Result<(), Box<dyn std::error::Error>> {
-        let test_data_dir = PathBuf::from("tests/data");
+        let test_data_dir = Path::new("tests/data");
         let input_epub_path = find_first_epub(&test_data_dir)
             .expect("There should be an EPUB file in tests/data for the test to pass");
 
         // Create a temporary directory for the test
         let temp_dir = tempdir()?;
-        let extracted_dir = temp_dir.path().join("extracted");
-        let output_epub_path = temp_dir.path().join("output.epub");
+        let temp_dir_path = temp_dir.path();
+        let extracted_dir = temp_dir_path.join("extracted");
+        let output_epub_path = temp_dir_path.join("output.epub");
 
         // Unzip the EPUB file
-        unzip_epub_from_path(
-            input_epub_path.to_str().unwrap(),
-            extracted_dir.to_str().unwrap(),
-        )?;
+        unzip_epub_from_path(&input_epub_path, &extracted_dir)?;
 
         // Zip the extracted folder back to EPUB
-        zip_folder_to_epub(
-            extracted_dir.to_str().unwrap(),
-            output_epub_path.to_str().unwrap(),
-        )?;
+        zip_folder_to_epub(&extracted_dir, &output_epub_path)?;
 
         let output = Command::new("docker")
             .args(&[
                 "run",
                 "--rm",
                 "-v",
-                &format!("{}:/data", temp_dir.path().to_str().unwrap()),
+                &format!("{}:/data", temp_dir_path.to_str().unwrap()),
                 "carlosfy/epubcheck",
                 "output.epub",
             ])
@@ -172,7 +167,7 @@ mod tests {
         Ok(())
     }
 
-    fn find_first_epub(dir: &PathBuf) -> Option<PathBuf> {
+    fn find_first_epub(dir: &Path) -> Option<PathBuf> {
         fs::read_dir(dir)
             .expect("Failed to read directory")
             .filter_map(|entry| entry.ok())
@@ -182,8 +177,8 @@ mod tests {
 
     #[test]
     fn test_get_xhtml_paths() -> Result<(), Box<dyn std::error::Error>> {
-        let test_data_dir = "tests/data/epub_folder";
-        let xhtml_files = get_xhtml_paths(&test_data_dir)?;
+        let test_data_dir = Path::new("tests/data/epub_folder");
+        let xhtml_files = get_xhtml_paths(test_data_dir)?;
         assert_eq!(xhtml_files.count(), 10);
         Ok(())
     }

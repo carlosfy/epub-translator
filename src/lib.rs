@@ -3,12 +3,16 @@ pub mod epub;
 pub mod xhtml;
 
 use crate::deepl::models::DeepLConfiguration;
-use std::path::PathBuf;
+
+use std::path::Path;
+
+use epub::unzip_epub_from_path;
+use tempfile::tempdir;
 
 pub async fn translate_epub(
-    input_file: PathBuf,
-    output_file: PathBuf,
-    target_lang: String,
+    input_file: &Path,
+    output_file: &Path,
+    target_lang: &str,
     source_lang: Option<String>,
     parallel: u8,
     config: DeepLConfiguration,

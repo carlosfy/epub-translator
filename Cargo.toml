@@ -19,6 +19,7 @@ kuchiki = "0.8.1"
 html5ever = "0.26"
 markup5ever_rcdom = "0.2"
 clap = { version = "4.3", features = ["derive"] }
+tempfile = "3.10.0"
 
 [dev-dependencies]
-tempfile = "3.10.0"
+

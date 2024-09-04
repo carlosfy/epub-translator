@@ -1,6 +1,6 @@
-use std::env;
-
 use epub_translator::epub::unzip_epub_from_path;
+use std::env;
+use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -10,8 +10,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    let epub_path = &args[1];
-    let output_dir = &args[2];
+    let epub_path = Path::new(&args[1]);
+    let output_dir = Path::new(&args[2]);
 
     unzip_epub_from_path(epub_path, &output_dir)?;
 
