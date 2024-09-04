@@ -3,6 +3,7 @@ name = "epub-translator"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+default-run = "epub-translator"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -17,6 +18,7 @@ serde_json = "1.0"
 kuchiki = "0.8.1"
 html5ever = "0.26"
 markup5ever_rcdom = "0.2"
+clap = { version = "4.3", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.10.0"

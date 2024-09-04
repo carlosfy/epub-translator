@@ -162,7 +162,6 @@ pub async fn run_mock_server() -> Result<oneshot::Sender<()>, Box<dyn std::error
     Ok(tx)
 }
 
-#[cfg(test)]
 pub fn get_test_config() -> DeepLConfiguration {
     DeepLConfiguration {
         api_url: format!("{}/v2", DEEPL_MOCK_API_URL),
