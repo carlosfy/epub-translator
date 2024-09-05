@@ -120,7 +120,7 @@ pub fn get_text_nodes_from_path(
 mod tests {
     use super::*;
     use html5ever::tendril::StrTendril;
-    use std::fs;
+    use std::{fs, path::Path};
 
     #[test]
     fn test_modify_text_nodes() -> Result<(), Box<dyn std::error::Error>> {
@@ -173,7 +173,7 @@ mod tests {
             </html>
         "#;
 
-        let expexted_xhtml = "<html><head>\n                </head>\n                <body>\n                    <figure class=\"figure-class\" id=\"img-ge1\">\n                        <span epub:type=\"pagebreak\" id=\"pg5\"/>\n                        <img alt=\"ima\" id=\"im01\" src=\"../images/pg01.jpg\">\n                        <figcaption id=\"fig01\">Figure caption.</figcaption>\n                    </figure>\n                \n            \n        </body></html>";
+        let expexted_xhtml = "<html><head>\n                </head>\n                <body>\n                    <figure class=\"figure-class\" id=\"img-ge1\">\n                        <span epub:type=\"pagebreak\" id=\"pg5\"/>\n                        <img alt=\"ima\" id=\"im01\" src=\"../images/pg01.jpg\"/>\n                        <figcaption id=\"fig01\">Figure caption.</figcaption>\n                    </figure>\n                \n            \n        </body></html>";
 
         let document = get_document_node(input_xhtml)?;
         let processed_input_xhtml = serialize_document_to_string(&document)?;

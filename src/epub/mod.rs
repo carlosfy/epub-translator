@@ -1,6 +1,7 @@
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use walkdir::WalkDir;
 use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
@@ -118,11 +119,38 @@ pub fn zip_folder_to_epub(
     Ok(())
 }
 
+pub fn epubcheck(epub_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    // Get folder from path
+    let folder = epub_path.parent().unwrap();
+
+    // Get name from path
+    let epub_name = epub_path.strip_prefix(folder)?.to_str().unwrap();
+
+    let output = Command::new("docker")
+        .args(&[
+            "run",
+            "--rm",
+            "-v",
+            &format!("{}:/data", folder.to_str().unwrap()),
+            "carlosfy/epubcheck",
+            &format!("{}", epub_name),
+        ])
+        .output()?;
+
+    // Check if EpubCheck was successful, needs to be logged in docker.
+    assert!(
+        output.status.success(),
+        "EpubCheck failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::process::Command;
     use tempfile::tempdir;
 
     // This test will find the first epub file in tests/data, unzip it, and then zip it back.
@@ -146,23 +174,7 @@ mod tests {
         // Zip the extracted folder back to EPUB
         zip_folder_to_epub(&extracted_dir, &output_epub_path)?;
 
-        let output = Command::new("docker")
-            .args(&[
-                "run",
-                "--rm",
-                "-v",
-                &format!("{}:/data", temp_dir_path.to_str().unwrap()),
-                "carlosfy/epubcheck",
-                "output.epub",
-            ])
-            .output()?;
-
-        // Check if EpubCheck was successful, needs to be logged in docker.
-        assert!(
-            output.status.success(),
-            "EpubCheck failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        epubcheck(&output_epub_path)?;
 
         Ok(())
     }
