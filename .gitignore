@@ -1,3 +1,7 @@
 /target
 /tests/data/*.epub
 /temp
+<<<<<<< Updated upstream
+Cargo.lock
+=======
+>>>>>>> Stashed changes

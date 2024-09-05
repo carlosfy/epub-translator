@@ -120,7 +120,7 @@ pub fn get_text_nodes_from_path(
 mod tests {
     use super::*;
     use html5ever::tendril::StrTendril;
-    use std::{fs, path::Path};
+    use std::fs;
 
     #[test]
     fn test_modify_text_nodes() -> Result<(), Box<dyn std::error::Error>> {
