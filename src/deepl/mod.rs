@@ -181,18 +181,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_translate_usage_and_languages() -> Result<(), Box<dyn Error>> {
-        let _shutdown_signal = run_mock_server()
-            .await
-            .expect("Failed to create the mock server");
+        // Wait for the mock server to be ready, run by the tests in lib.rs
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
         let config = get_test_config();
 
         let translate_result = translate(&config, "Hello", "ES").await?;
         let usage_result = get_usage(&config).await?;
         let languages_result = get_languages(&config).await?;
-
-        _shutdown_signal
-            .send(())
-            .expect("Failed to send shutdown signal");
 
         // Translate check
         assert_eq!(translate_result, "--|Hello|-- Translated to ES");
