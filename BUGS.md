@@ -85,3 +85,20 @@ When serializing, do the opposite by replacing empty span double tags with self-
 let re_span = Regex::new(r"<span([^>]*?)></span>")?;
 output_string = re_span.replace_all(&output_string, "<span$1/>").to_string();
 ```
+
+## 3. Bad Serialization of Non-Breaking Spaces
+
+**Library**: html5ever 0.26
+
+**Description**: When serializing XHTML, non-breaking spaces are serialized as `&nbsp;` literal. For example, 3 non-breaking spaces are serialized as `&nbsp;&nbsp;&nbsp;` instead of `   `.
+
+Epubcheck message:
+```
+FATAL(RSC-016): file.xhtml(x,y): Fatal Error while parsing file: The entity "nbsp" was referenced, but not declared.
+```
+
+**Workaround**: Pattern match `&nbsp;` and replace it by `\u{00A0}` with: 
+```rust
+let re_nbsp = Regex::new(r"&nbsp;")?;
+let content = re_nbsp.replace_all(&content, "\u{00A0}").to_string();
+```
