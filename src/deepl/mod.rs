@@ -25,7 +25,7 @@ pub async fn translate(
     target_lang: &str,
 ) -> Result<String, Box<dyn Error>> {
     eprintln!(
-        "[MOCK SERVER] Translating text: {} to {}",
+        "Requesting translation of text: {} to {}",
         text, target_lang
     );
     let client = Client::new();

@@ -178,10 +178,6 @@ mod tests {
         let document = get_document_node(input_xhtml)?;
         let processed_input_xhtml = serialize_document_to_string(&document)?;
 
-        // write to file in /tests/data/test_serialize_and_deserialize.xhtml
-        let mut file = fs::File::create("tests/data/test_serialize_and_deserialize.xhtml")?;
-        file.write_all(processed_input_xhtml.as_bytes())?;
-
         assert_eq!(processed_input_xhtml, expexted_xhtml);
 
         Ok(())
