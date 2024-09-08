@@ -1,5 +1,5 @@
 use epub_translator::deepl::models::DeepLConfiguration;
-use epub_translator::deepl::{get_languages, get_test_config, get_usage, run_mock_server};
+use epub_translator::deepl::{get_languages, get_test_config, get_usage, start_deepl_server};
 use epub_translator::{count_epub_char, translate_epub};
 
 use clap::Parser;
@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // If test then start mock server
     let shutdown_mock_server_signal = if args.test {
         println!("Starting mock server for test mode...");
-        match run_mock_server().await {
+        match start_deepl_server().await {
             Ok(signal) => {
                 println!("Mock server started successfully");
                 Some(signal)

@@ -150,17 +150,12 @@ pub fn epubcheck(epub_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use tempfile::tempdir;
 
-    // This test will find the first epub file in tests/data, unzip it, and then zip it back.
-    // Then it will check that epub is still valid by using epubcheck.
     // https://github.com/w3c/epubcheck
     #[test]
     fn test_correctness_after_unzip_and_zip() -> Result<(), Box<dyn std::error::Error>> {
-        let test_data_dir = Path::new("tests/data");
-        let input_epub_path = find_first_epub(&test_data_dir)
-            .expect("There should be an EPUB file in tests/data for the test to pass");
+        let input_epub_path = Path::new("tests/data/epub_to_test/input.epub");
 
         // Create a temporary directory for the test
         let temp_dir = tempdir()?;
@@ -177,14 +172,6 @@ mod tests {
         epubcheck(&output_epub_path)?;
 
         Ok(())
-    }
-
-    fn find_first_epub(dir: &Path) -> Option<PathBuf> {
-        fs::read_dir(dir)
-            .expect("Failed to read directory")
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("epub"))
     }
 
     #[test]

@@ -1,7 +1,9 @@
 /target
 /tests/data/*.epub
 /temp
-<<<<<<< Updated upstream
-Cargo.lock
-=======
->>>>>>> Stashed changes
+plot-csv
+./Cargo.lock
+.vscode
+.DS_Store
+tests/data/school_folder_valid/
+tests/data/tries/
