@@ -3,6 +3,7 @@ pub mod models;
 use reqwest::Client;
 use std::error::Error;
 use std::fs;
+use std::future::Future;
 
 use std::collections::HashMap;
 
@@ -16,6 +17,8 @@ use std::net::SocketAddr;
 use tokio::sync::oneshot;
 use tokio::time::Duration;
 use warp::Filter;
+
+use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 
 // TODO: Rewrite taking client as parameter
 // translate.sh
@@ -84,95 +87,84 @@ pub async fn get_languages(
     Ok(response)
 }
 
-// Sets up a mock server on DEEPL_MOCK_API_URL that emulates the DeepL API
-// Returns a oneshot::Sender<()> to signal the server to shut down
-pub async fn run_mock_server() -> Result<oneshot::Sender<()>, Box<dyn std::error::Error>> {
-    let addr: SocketAddr = ([127, 0, 0, 1], 3030).into(); // How to use DEEPL_MOCK_API_URL?
-
-    // Create routes
-    // Translate
-    let translate = warp::post()
-        .and(warp::path("v2"))
-        .and(warp::path("translate"))
-        .and(warp::body::json::<TranslationRequest>())
-        .map(|translation_request: TranslationRequest| {
-            eprintln!(
-                "[MOCK SERVER] Translation request {:?}",
-                translation_request
-            );
-
-            let response = TranslationResponse {
-                translations: vec![Translation {
-                    detected_source_language: "EN".to_string(),
-                    text: format!(
-                        "--|{}|-- Translated to {}",
-                        translation_request.text[0], translation_request.target_lang
-                    ),
-                }],
-            };
-
-            warp::reply::json(&response)
-        });
-
-    // Usage
-    let usage = warp::get()
-        .and(warp::path("v2"))
-        .and(warp::path("usage"))
-        .map(|| {
-            eprintln!("[MOCK SERVER]  Usage request");
-            let usage_response = UsageResponse {
-                character_count: 1000,
-                character_limit: 500000,
-            };
-
-            warp::reply::json(&usage_response)
-        });
-
-    // Languages
-    let languages_json =
-        fs::read_to_string("src/deepl/languages.json").expect("Failed to read languages.json");
-    let languages_response: LanguagesResponse =
-        serde_json::from_str(&languages_json).expect("Failed to parse languages.json");
-
-    let languages = warp::get()
-        .and(warp::path("v2"))
-        .and(warp::path("languages"))
-        .and(warp::query::<HashMap<String, String>>())
-        .map(move |params: HashMap<String, String>| {
-            eprintln!("[MOCK SERVER] Languages request");
-
-            let type_param = params.get("type");
-
-            if type_param.is_none() || type_param.unwrap() != "target" {
-                warp::reply::json(&languages_response)
-            } else {
-                warp::reply::json(&LanguagesResponse(vec![]))
-            }
-        });
-
-    let routes = translate.or(usage).or(languages);
-
-    let (tx, rx) = oneshot::channel();
-
-    tokio::spawn(async move {
-        eprintln!("[MOCK SERVER] Starting server on {}", DEEPL_MOCK_API_URL);
-        let (_, server) = warp::serve(routes).bind_with_graceful_shutdown(addr, async {
-            rx.await.ok();
-        });
-
-        server.await
-    });
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    Ok(tx)
-}
-
 pub fn get_test_config() -> DeepLConfiguration {
     DeepLConfiguration {
         api_url: format!("{}/v2", DEEPL_MOCK_API_URL),
         auth_key: "mock_auth_key".to_string(),
     }
+}
+
+#[post("/v2/translate")]
+async fn r_translate(req: web::Json<TranslationRequest>) -> impl Responder {
+    println!("Received translate request");
+    // sleep(Duration::from_millis(50)).await;
+
+    let translations = vec![Translation {
+        detected_source_language: "EN".to_string(),
+        text: format!("--|{}|-- Translated to {}", req.text[0], req.target_lang),
+    }];
+
+    HttpResponse::Ok().json(TranslationResponse { translations })
+}
+
+#[get("/v2/usage")]
+async fn r_usage() -> impl Responder {
+    println!("Received usage request");
+    let usage_response = UsageResponse {
+        character_count: 1000,
+        character_limit: 500000,
+    };
+
+    HttpResponse::Ok().json(usage_response)
+}
+
+#[get("/v2/languages")]
+async fn r_languages(query: web::Query<HashMap<String, String>>) -> impl Responder {
+    println!("Received languages request");
+    let languages_json =
+        fs::read_to_string("src/deepl/languages.json").expect("Failed to read languages.json");
+    let languages_response: LanguagesResponse =
+        serde_json::from_str(&languages_json).expect("Failed to parse languages.json");
+
+    let type_param = query.get("type");
+
+    if type_param.is_none() || type_param.unwrap() != "target" {
+        HttpResponse::Ok().json(&languages_response)
+    } else {
+        HttpResponse::Ok().json(&LanguagesResponse(vec![]))
+    }
+}
+
+use tokio::time::sleep;
+
+pub async fn start_deepl_server() -> Result<oneshot::Sender<()>, Box<dyn Error>> {
+    let (tx, rx) = oneshot::channel::<()>();
+
+    let server = HttpServer::new(|| {
+        App::new()
+            .service(r_translate)
+            .service(r_usage)
+            .service(r_languages)
+    })
+    .bind("127.0.0.1:3030")?;
+
+    let server = server.run();
+    let server_handle = server.handle();
+
+    // Spawn a task to run the server
+    tokio::spawn(async move {
+        server.await.expect("Server failed to run");
+    });
+
+    tokio::spawn(async move {
+        rx.await.ok();
+        println!("Shutdown signal received, stopping server...");
+        server_handle.stop(true).await;
+    });
+
+    println!("Server started and listening on http://127.0.0.1:3030");
+
+    Ok(tx)
 }
 
 #[cfg(test)]

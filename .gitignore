@@ -2,7 +2,7 @@
 /tests/data/*.epub
 /temp
 plot-csv
-Cargo.lock
+./Cargo.lock
 .vscode
 .DS_Store
 tests/data/school_folder_valid/

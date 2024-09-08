@@ -134,7 +134,7 @@ pub async fn translate_epub_to_folder(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deepl::{get_test_config, run_mock_server};
+    use deepl::{get_test_config, start_deepl_server};
     use epub::epubcheck;
 
     use tokio::time::Duration;
@@ -151,7 +151,7 @@ mod tests {
         let parallel = 1;
         let config = get_test_config();
 
-        let shutdown_signal = run_mock_server().await?;
+        let shutdown_signal = start_deepl_server().await?;
 
         translate_epub(
             &input_file,
