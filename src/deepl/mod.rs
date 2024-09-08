@@ -3,7 +3,6 @@ pub mod models;
 use reqwest::Client;
 use std::error::Error;
 use std::fs;
-use std::future::Future;
 
 use std::collections::HashMap;
 
@@ -13,10 +12,8 @@ use models::{
     DEEPL_USAGE_PATH,
 };
 
-use std::net::SocketAddr;
 use tokio::sync::oneshot;
 use tokio::time::Duration;
-use warp::Filter;
 
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 
@@ -53,7 +50,7 @@ pub async fn translate(
 
 // usage.sh
 pub async fn get_usage(config: &DeepLConfiguration) -> Result<UsageResponse, Box<dyn Error>> {
-    eprintln!("[MOCK SERVER] Getting usage from {}", config.api_url);
+    println!("Getting usage from {}", config.api_url);
     let client = Client::new();
 
     let request = client
@@ -72,7 +69,7 @@ pub async fn get_usage(config: &DeepLConfiguration) -> Result<UsageResponse, Box
 pub async fn get_languages(
     config: &DeepLConfiguration,
 ) -> Result<LanguagesResponse, Box<dyn Error>> {
-    eprintln!("[MOCK SERVER] Getting languages from {}", config.api_url);
+    eprintln!("Getting languages from {}", config.api_url);
     let client = Client::new();
 
     let request = client
@@ -96,7 +93,7 @@ pub fn get_test_config() -> DeepLConfiguration {
 
 #[post("/v2/translate")]
 async fn r_translate(req: web::Json<TranslationRequest>) -> impl Responder {
-    println!("Received translate request");
+    eprintln!("[MOCK SERVER] Received translate request");
     // sleep(Duration::from_millis(50)).await;
 
     let translations = vec![Translation {
@@ -109,7 +106,7 @@ async fn r_translate(req: web::Json<TranslationRequest>) -> impl Responder {
 
 #[get("/v2/usage")]
 async fn r_usage() -> impl Responder {
-    println!("Received usage request");
+    println!("[MOCK SERVER] Received usage request");
     let usage_response = UsageResponse {
         character_count: 1000,
         character_limit: 500000,
@@ -120,7 +117,7 @@ async fn r_usage() -> impl Responder {
 
 #[get("/v2/languages")]
 async fn r_languages(query: web::Query<HashMap<String, String>>) -> impl Responder {
-    println!("Received languages request");
+    eprintln!("[MOCK SERVER] Received languages request");
     let languages_json =
         fs::read_to_string("src/deepl/languages.json").expect("Failed to read languages.json");
     let languages_response: LanguagesResponse =
@@ -134,8 +131,6 @@ async fn r_languages(query: web::Query<HashMap<String, String>>) -> impl Respond
         HttpResponse::Ok().json(&LanguagesResponse(vec![]))
     }
 }
-
-use tokio::time::sleep;
 
 pub async fn start_deepl_server() -> Result<oneshot::Sender<()>, Box<dyn Error>> {
     let (tx, rx) = oneshot::channel::<()>();
