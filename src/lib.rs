@@ -6,6 +6,7 @@ use crate::deepl::models::DeepLConfiguration;
 use crate::deepl::translate;
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use epub::{get_xhtml_paths, unzip_epub_from_path, zip_folder_to_epub};
 use xhtml::{
@@ -13,15 +14,18 @@ use xhtml::{
 };
 
 use html5ever::tendril::StrTendril;
-use markup5ever_rcdom::NodeData;
+use markup5ever_rcdom::{Node, NodeData};
+use std::rc::Rc;
+use std::sync::Arc;
 use tempfile::tempdir;
+use tokio::sync::Semaphore;
 
 pub async fn translate_epub(
     input_file: &Path,
     output_file: &Path,
     target_lang: &str,
     source_lang: Option<String>,
-    parallel: u8,
+    parallel: usize,
     config: DeepLConfiguration,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create a temporary directory
@@ -31,28 +35,67 @@ pub async fn translate_epub(
     // Unzip it into a temporary directory
     unzip_epub_from_path(input_file, temp_dir_path)?;
 
+    // Create semaphore to control the number of concurrent requests
+    let semaphore = Arc::new(Semaphore::new(parallel as usize));
+
     // Create iterator over all xhtml files
     let xhtml_files = get_xhtml_paths(temp_dir_path)?;
 
-    for file in xhtml_files {
-        let file_path = PathBuf::from(file);
-        // Get text nodes from all xhtml files
-        let document = get_document_node_from_path(&file_path)?;
-        let nodes = get_text_nodes(&document)?;
+    // Get all root nodes, to then serialize them
+    let documents = xhtml_files
+        .map(|file| {
+            let file_path = PathBuf::from(file);
+            let document = get_document_node_from_path(&file_path).unwrap(); // Care about this
+            (document, file_path)
+        })
+        .collect::<Vec<(Rc<Node>, PathBuf)>>();
 
-        // Translate text nodes
-        for node in nodes {
-            if let NodeData::Text { contents } = &node.data {
-                let mut text = contents.borrow_mut();
-                if !text.trim().is_empty() {
-                    let translated = translate(&config, &text, target_lang).await?;
-                    *text = StrTendril::from(translated);
-                }
+    // Get all text nodes from all documents, having all together in the same iterator
+    // allows to parallelize across all documents, so more threads can be used.
+    let nodes = documents
+        .iter()
+        .flat_map(|(document, _)| get_text_nodes(&document).unwrap())
+        .collect::<Vec<Rc<Node>>>();
+
+    let mut tasks = Vec::new();
+
+    // Translate text nodes
+    for node in nodes {
+        if let NodeData::Text { contents } = &node.data {
+            let text = contents.borrow().to_string();
+            if !text.trim().is_empty() {
+                let config_clone = config.clone();
+                let target_lang = target_lang.to_string();
+                let semaphore_clone = semaphore.clone();
+
+                let task = tokio::spawn(async move {
+                    let _permit = semaphore_clone.acquire().await;
+                    if let Ok(_permit) = _permit {
+                        let permits_available = semaphore_clone.available_permits();
+                        eprintln!("Permits available: {}", permits_available);
+                        translate(&config_clone, &text, &target_lang).await.ok()
+                    } else {
+                        None
+                    }
+                });
+
+                tasks.push((node, task));
             }
         }
+    }
 
-        // Serialize the xhtml files
-        serialize_document(&document, &file_path)?;
+    // Wait for all tasks to finish
+    for (node, task) in tasks {
+        if let Some(translated) = task.await? {
+            if let NodeData::Text { contents } = &node.data {
+                let mut text = contents.borrow_mut();
+                *text = StrTendril::from(translated);
+            }
+        }
+    }
+
+    for (document, path) in &documents {
+        serialize_document(&document, &path)?;
     }
 
     // Zip the temporary directory into the output file
@@ -136,7 +179,6 @@ mod tests {
     use super::*;
     use deepl::{get_test_config, start_deepl_server};
     use epub::epubcheck;
-
     use tokio::time::Duration;
 
     #[tokio::test]
@@ -148,11 +190,12 @@ mod tests {
         let output_file = temp_dir.path().join("output.epub");
         let target_lang = "ES";
         let source_lang: Option<String> = None;
-        let parallel = 1;
+        let parallel = 1000;
         let config = get_test_config();
 
         let shutdown_signal = start_deepl_server().await?;
 
+        let start = Instant::now();
         translate_epub(
             &input_file,
             &output_file,
@@ -162,6 +205,9 @@ mod tests {
             config,
         )
         .await?;
+
+        let duration = start.elapsed();
+        eprintln!("=========> Time taken {:?}", duration);
 
         epubcheck(&output_file)?;
 
