@@ -13,6 +13,7 @@ use models::{
 };
 
 use tokio::sync::oneshot;
+use tokio::time::sleep;
 use tokio::time::Duration;
 
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
@@ -94,7 +95,7 @@ pub fn get_test_config() -> DeepLConfiguration {
 #[post("/v2/translate")]
 async fn r_translate(req: web::Json<TranslationRequest>) -> impl Responder {
     eprintln!("[MOCK SERVER] Received translate request");
-    // sleep(Duration::from_millis(50)).await;
+    sleep(Duration::from_millis(400)).await;
 
     let translations = vec![Translation {
         detected_source_language: "EN".to_string(),

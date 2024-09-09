@@ -33,7 +33,7 @@ pub struct UsageResponse {
     pub character_limit: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DeepLConfiguration {
     pub auth_key: String,
     pub api_url: String,

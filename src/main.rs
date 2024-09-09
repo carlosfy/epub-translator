@@ -4,7 +4,7 @@ use epub_translator::{count_epub_char, translate_epub};
 
 use clap::Parser;
 use std::path::PathBuf;
-
+use std::time::Instant;
 #[derive(Parser, Debug)]
 #[command(author = "Carlos Yago, @carlosfy", version = "0.1.0", about = "Translate EPUB files", long_about = None)]
 struct Args {
@@ -24,7 +24,7 @@ struct Args {
 
     /// Number of parallel translation requests (default: 1)
     #[arg(short, long, default_value_t = 1)]
-    parallel: u8,
+    parallel: usize,
 
     /// DeepL API key (optional, defaults to DEEPL_API_KEY environment variable)
     #[arg(short = 'k', long)]
@@ -139,6 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     }
 
+    let start = Instant::now();
     match translate_epub(
         &args.input_file,
         &args.output_file,
@@ -155,6 +156,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
     }
+
+    let translate_duration = start.elapsed();
+    eprintln!("=======> Translate duration: {:?}", translate_duration);
 
     // Shutdown mock server if test mode
     if let Some(signal) = shutdown_mock_server_signal {
