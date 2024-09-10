@@ -6,3 +6,4 @@ plot-csv
 .DS_Store
 tests/data/school_folder_valid/
 tests/data/tries/
+tests/benchmark/translation_performance_analysis.ipynb

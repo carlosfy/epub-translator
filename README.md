@@ -41,7 +41,7 @@ OPTIONS:
 ## Development Status
 
 This project is being optimized for performance. It works but it will be much faster.
-See performance analysis [here](./tests/benchmark/translation_analysis.ipynb)
+See performance analysis [here](./tests/benchmark/performance_analysis.ipynb)
 
 ## License
 
