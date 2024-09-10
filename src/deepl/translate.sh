@@ -4,7 +4,7 @@ curl -X POST 'https://api-free.deepl.com/v2/translate' \
 --header 'Content-Type: application/json' \
 --data '{
   "text": [
-    "Hello, world!"
+    "Hi"
   ],
   "target_lang": "ES"
 }'

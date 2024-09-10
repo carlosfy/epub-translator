@@ -69,14 +69,10 @@ pub async fn translate_epub(
                 let semaphore_clone = semaphore.clone();
 
                 let task = tokio::spawn(async move {
-                    let _permit = semaphore_clone.acquire().await;
-                    if let Ok(_permit) = _permit {
-                        let permits_available = semaphore_clone.available_permits();
-                        eprintln!("Permits available: {}", permits_available);
-                        translate(&config_clone, &text, &target_lang).await.ok()
-                    } else {
-                        None
-                    }
+                    let _permit = semaphore_clone.acquire().await.unwrap();
+                    let permits_available = semaphore_clone.available_permits();
+                    eprintln!("Permits available: {}", permits_available);
+                    translate(&config_clone, &text, &target_lang).await.ok()
                 });
 
                 tasks.push((node, task));
