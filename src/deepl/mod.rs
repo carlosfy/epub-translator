@@ -26,7 +26,7 @@ pub async fn translate(
     target_lang: &str,
 ) -> Result<String, Box<dyn Error>> {
     eprintln!(
-        "[TRANSLATE FUNCTION] Request translation of text: {} to {}",
+        "[TRANSLATE FUNCTION] Request translation of text: |{}| to {}",
         text, target_lang
     );
     let client = Client::new();
@@ -47,8 +47,8 @@ pub async fn translate(
     let response: TranslationResponse = request.send().await?.json().await?;
     let translated_text = response.translations[0].text.clone();
     eprintln!(
-        "[TRANSLATE FUNCTION]{} translated to {}: {:?}",
-        text, target_lang, &response
+        "[TRANSLATE FUNCTION] |{}| translated to {}: |{}|",
+        text, target_lang, &translated_text
     );
 
     Ok(translated_text)
