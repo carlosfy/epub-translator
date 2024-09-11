@@ -26,7 +26,7 @@ pub async fn translate(
     target_lang: &str,
 ) -> Result<String, Box<dyn Error>> {
     eprintln!(
-        "Requesting translation of text: {} to {}",
+        "[TRANSLATE FUNCTION] Request translation of text: {} to {}",
         text, target_lang
     );
     let client = Client::new();
@@ -45,8 +45,13 @@ pub async fn translate(
         );
 
     let response: TranslationResponse = request.send().await?.json().await?;
+    let translated_text = response.translations[0].text.clone();
+    eprintln!(
+        "[TRANSLATE FUNCTION]{} translated to {}: {:?}",
+        text, target_lang, &response
+    );
 
-    Ok(response.translations[0].text.clone())
+    Ok(translated_text)
 }
 
 // usage.sh
@@ -94,7 +99,11 @@ pub fn get_test_config() -> DeepLConfiguration {
 
 #[post("/v2/translate")]
 async fn r_translate(req: web::Json<TranslationRequest>) -> impl Responder {
-    eprintln!("[MOCK SERVER] Received translate request");
+    let text_to_translate = &req.text[0];
+    eprintln!(
+        "[MOCK SERVER] Received translate request: |{}|",
+        text_to_translate
+    );
     sleep(Duration::from_millis(400)).await;
 
     let translations = vec![Translation {
