@@ -37,6 +37,7 @@ pub async fn translate_epub(
 
     // Create semaphore to control the number of concurrent requests
     let semaphore = Arc::new(Semaphore::new(parallel as usize));
+    let retries = 3;
 
     // Create iterator over all xhtml files
     let xhtml_files = get_xhtml_paths(temp_dir_path)?;
@@ -72,7 +73,25 @@ pub async fn translate_epub(
                     let _permit = semaphore_clone.acquire().await.unwrap();
                     let permits_available = semaphore_clone.available_permits();
                     eprintln!("Permits available: {}", permits_available);
-                    translate(&config_clone, &text, &target_lang).await.ok()
+
+                    let mut remaining_attemps = retries;
+                    while remaining_attemps > 0 {
+                        match translate(&config_clone, &text, &target_lang).await {
+                            Ok(translated) => return Some(translated),
+                            Err(e) => {
+                                if !remaining_attemps > 0 {
+                                    eprintln!(
+                                        "Error translating text: |{}|, error: {}. No more retries",
+                                        &text, e
+                                    );
+                                    return None;
+                                }
+                                eprintln!("Error translating text: |{}|, error: {}, remaining attempts: {}", &text, e, remaining_attemps);
+                                remaining_attemps -= 1;
+                            }
+                        }
+                    }
+                    None
                 });
 
                 tasks.push((node, task));

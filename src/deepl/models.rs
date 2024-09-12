@@ -75,7 +75,7 @@ impl DeepLConfiguration {
 pub struct Language {
     pub language: String,
     pub name: String,
-    pub supports_formality: bool,
+    pub supports_formality: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -32,10 +32,16 @@ pub fn get_document_node(content: &str) -> Result<Rc<Node>, Box<dyn std::error::
 pub fn get_text_nodes(node: &Rc<Node>) -> Result<Vec<Rc<Node>>, Box<dyn std::error::Error>> {
     let mut text_nodes = Vec::new();
 
+    let alpha_regex = Regex::new(r"[a-zA-Z]")?;
+
     match &node.data {
-        NodeData::Text { .. } => {
-            text_nodes.push(node.clone());
+        NodeData::Text { contents } => {
+            let text = contents.borrow();
+            if !text.trim().is_empty() && alpha_regex.is_match(&text) {
+                text_nodes.push(node.clone());
+            }
         }
+
         NodeData::Element { ref name, .. } if name.local.as_ref() == "style" => {}
         _ => {
             for child in node.children.borrow().iter() {
