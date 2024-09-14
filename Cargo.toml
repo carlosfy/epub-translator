@@ -8,12 +8,11 @@ default-run = "epub-translator"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-zip = "0.6"
+zip = "2.2"
 walkdir = "2.3.3"
 reqwest = {version = "0.12.5", features = ["json"]}
 serde = {version = "1.0", features = ["derive"]}
 tokio = { version = "1", features = ["full", "test-util"] }
-warp = "0.3"
 serde_json = "1.0"
 kuchiki = "0.8.1"
 html5ever = "0.26"

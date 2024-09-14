@@ -3,6 +3,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use walkdir::WalkDir;
+use zip::write::SimpleFileOptions;
 use zip::{write::FileOptions, ZipArchive, ZipWriter};
 
 // Get an operator over all the xhtml files in the epub folder
@@ -75,8 +76,8 @@ pub fn zip_folder_to_epub(
     let epub_file = File::create(epub_path)?;
     let mut zip = ZipWriter::new(epub_file);
 
-    // Add mimetype file first, withtout compression
-    let stored_options = FileOptions::default()
+    // Add mimetype file first, without compression
+    let stored_options: SimpleFileOptions = FileOptions::default()
         .compression_method(zip::CompressionMethod::Stored)
         .unix_permissions(0o644);
 
@@ -90,7 +91,7 @@ pub fn zip_folder_to_epub(
     }
 
     // Add the rest of the files with compression
-    let deflated_options = FileOptions::default()
+    let deflated_options: SimpleFileOptions = FileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
         .unix_permissions(0o755);
 
