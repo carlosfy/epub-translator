@@ -6,6 +6,8 @@ use crate::deepl::models::DeepLConfiguration;
 use crate::deepl::translate;
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
 use epub::{get_xhtml_paths, unzip_epub_from_path, zip_folder_to_epub};
@@ -14,9 +16,8 @@ use xhtml::{
 };
 
 use html5ever::tendril::StrTendril;
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use markup5ever_rcdom::{Node, NodeData};
-use std::rc::Rc;
-use std::sync::Arc;
 use tempfile::tempdir;
 use tokio::sync::Semaphore;
 
@@ -214,6 +215,16 @@ pub async fn translate_folder(
         }
     }
 
+    // Create a progress bar
+    let progress_bar =
+        ProgressBar::with_draw_target(Some(tasks.len() as u64), ProgressDrawTarget::stdout());
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({percent}%)")
+            .unwrap()
+            .progress_chars("##-"),
+    );
+
     // Wait for all tasks to finish
     for (node, task) in tasks {
         if let Some(translated) = task.await? {
@@ -222,7 +233,9 @@ pub async fn translate_folder(
                 *text = StrTendril::from(translated);
             }
         }
+        progress_bar.inc(1);
     }
+    progress_bar.finish_with_message("Translation completed");
 
     let end_translation = Instant::now();
     let translation_duration = end_translation - end_preprocessing;

@@ -76,6 +76,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("Error creating DeepL configuration")
     };
 
+    println!("");
+
     // If test then start mock server
     let shutdown_mock_server_signal = if args.test {
         println!("Starting mock server for test mode...");
@@ -96,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Double check if mock server is running
     if args.test {
         match get_usage(&config, args.verbose).await {
-            Ok(_) => println!("Mock server is running correctly."),
+            Ok(_) => {}
             Err(e) => {
                 eprintln!("Error: The mock server is not running or not responding correctly.");
                 eprintln!("Please ensure the mock server is started before running in test mode.");
@@ -126,14 +128,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Count the number of characters to translate
     let char_count = count_epub_char(&args.input_file)?;
-    println!("Number of characters to translate: {}", char_count);
 
     let usage = get_usage(&config, args.verbose).await?;
 
     // Show user the usage and the char count
     println!(
-        "Usage: {}, limit: {}",
-        &usage.character_count, &usage.character_limit
+        "DeepL Usage: Your limit is: {}, you have already use: {}",
+        &usage.character_limit, &usage.character_count
     );
     println!("Number of characters to translate: {}", char_count);
 
