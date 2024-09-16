@@ -18,17 +18,41 @@ use tokio::time::Duration;
 
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 
+macro_rules! conditional_named_log {
+    ($enabled:expr, $name:expr, $($arg:tt)*) => {
+        if $enabled {
+            eprintln!("[{}] {}:{} - {}", stringify!($name), file!(), line!(), format!($($arg)*));
+        }
+    };
+}
+
+macro_rules! api_log {
+    ($enabled:expr, $($arg:tt)*) => {
+        conditional_named_log!($enabled, "API CALL", $($arg)*);
+    };
+}
+
+macro_rules! mock_log {
+    ($($arg:tt)*) => {
+        conditional_named_log!(true, "MOCK SERVER", $($arg)*);
+    };
+}
+
 // TODO: Rewrite taking client as parameter
 // translate.sh
 pub async fn translate(
     config: &DeepLConfiguration,
     text: &str,
     target_lang: &str,
+    verbose: bool,
 ) -> Result<String, Box<dyn Error>> {
-    eprintln!(
-        "[TRANSLATE FUNCTION] Request translation of text: |{}| to {}",
-        text, target_lang
+    api_log!(
+        verbose,
+        "Request translation of text: |{}| to {}",
+        text,
+        target_lang
     );
+
     let client = Client::new();
 
     let body = TranslationRequest {
@@ -46,17 +70,23 @@ pub async fn translate(
 
     let response: TranslationResponse = request.send().await?.json().await?;
     let translated_text = response.translations[0].text.clone();
-    eprintln!(
-        "[TRANSLATE FUNCTION] |{}| translated to {}: |{}|",
-        text, target_lang, &translated_text
+    api_log!(
+        verbose,
+        "Translated to {}: |{}| -> |{}|",
+        target_lang,
+        text,
+        &translated_text
     );
 
     Ok(translated_text)
 }
 
 // usage.sh
-pub async fn get_usage(config: &DeepLConfiguration) -> Result<UsageResponse, Box<dyn Error>> {
-    println!("Getting usage from {}", config.api_url);
+pub async fn get_usage(
+    config: &DeepLConfiguration,
+    verbose: bool,
+) -> Result<UsageResponse, Box<dyn Error>> {
+    api_log!(verbose, "Getting usage from {}", config.api_url);
     let client = Client::new();
 
     let request = client
@@ -74,8 +104,9 @@ pub async fn get_usage(config: &DeepLConfiguration) -> Result<UsageResponse, Box
 // languages.sh
 pub async fn get_languages(
     config: &DeepLConfiguration,
+    verbose: bool,
 ) -> Result<LanguagesResponse, Box<dyn Error>> {
-    eprintln!("Getting languages from {}", config.api_url);
+    api_log!(verbose, "Getting languages from {}", config.api_url);
     let client = Client::new();
 
     let request = client
@@ -100,10 +131,8 @@ pub fn get_test_config() -> DeepLConfiguration {
 #[post("/v2/translate")]
 async fn r_translate(req: web::Json<TranslationRequest>) -> impl Responder {
     let text_to_translate = &req.text[0];
-    eprintln!(
-        "[MOCK SERVER] Received translate request: |{}|",
-        text_to_translate
-    );
+    mock_log!("Received translate request: |{}|", text_to_translate);
+
     sleep(Duration::from_millis(400)).await;
 
     let translations = vec![Translation {
@@ -116,7 +145,7 @@ async fn r_translate(req: web::Json<TranslationRequest>) -> impl Responder {
 
 #[get("/v2/usage")]
 async fn r_usage() -> impl Responder {
-    println!("[MOCK SERVER] Received usage request");
+    mock_log!("[MOCK SERVER] Received usage request");
     let usage_response = UsageResponse {
         character_count: 1000,
         character_limit: 500000,
@@ -127,7 +156,7 @@ async fn r_usage() -> impl Responder {
 
 #[get("/v2/languages")]
 async fn r_languages(query: web::Query<HashMap<String, String>>) -> impl Responder {
-    eprintln!("[MOCK SERVER] Received languages request");
+    mock_log!("Received languages request");
     let languages_json =
         fs::read_to_string("src/deepl/languages.json").expect("Failed to read languages.json");
     let languages_response: LanguagesResponse =
@@ -163,11 +192,11 @@ pub async fn start_deepl_server() -> Result<oneshot::Sender<()>, Box<dyn Error>>
 
     tokio::spawn(async move {
         rx.await.ok();
-        println!("Shutdown signal received, stopping server...");
+        mock_log!("Shutdown signal received, stopping server...");
         server_handle.stop(true).await;
     });
 
-    println!("Server started and listening on http://127.0.0.1:3030");
+    mock_log!("Server started and listening on http://127.0.0.1:3030");
 
     Ok(tx)
 }
@@ -183,9 +212,9 @@ mod tests {
 
         let config = get_test_config();
 
-        let translate_result = translate(&config, "Hello", "ES").await?;
-        let usage_result = get_usage(&config).await?;
-        let languages_result = get_languages(&config).await?;
+        let translate_result = translate(&config, "Hello", "ES", true).await?;
+        let usage_result = get_usage(&config, true).await?;
+        let languages_result = get_languages(&config, true).await?;
 
         // Translate check
         assert_eq!(translate_result, "--|Hello|-- Translated to ES");
