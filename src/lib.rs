@@ -20,6 +20,31 @@ use std::sync::Arc;
 use tempfile::tempdir;
 use tokio::sync::Semaphore;
 
+#[macro_export]
+macro_rules! profiling_log {
+    ($enabled:expr, $($arg:tt)*) => {
+        if $enabled {
+            eprintln!("[PROFILING] {}:{} - {}", file!(), line!(), format!($($arg)*));
+        }
+
+    };
+}
+
+macro_rules! timed {
+    ($print:expr, $func:ident, $($arg:expr),*) => {{
+        let start = Instant::now();
+        let result = $func($($arg),*);
+        let duration = start.elapsed();
+        profiling_log!($print,
+            "{}: function took {:?}",
+            stringify!($func),
+            duration);
+        result
+    }
+
+    };
+}
+
 pub async fn translate_epub(
     input_file: &Path,
     output_file: &Path,
@@ -27,6 +52,7 @@ pub async fn translate_epub(
     source_lang: Option<String>,
     concurrent_requests: usize,
     config: DeepLConfiguration,
+    verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create a temporary directory
     let temp_dir = tempdir()?;
@@ -40,11 +66,12 @@ pub async fn translate_epub(
         source_lang,
         concurrent_requests,
         config,
+        verbose,
     )
     .await?;
 
     // Zip the temporary directory into the output file
-    zip_folder_to_epub(temp_dir_path, output_file)?;
+    timed!(verbose, zip_folder_to_epub, temp_dir_path, output_file)?;
 
     Ok(())
 }
@@ -57,9 +84,10 @@ pub async fn translate_epub_to_folder(
     source_lang: Option<String>,
     concurrent_requests: usize,
     config: DeepLConfiguration,
+    verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Unzips the epub to the output_dir
-    unzip_epub_from_path(input_file, output_dir)?;
+    timed!(verbose, unzip_epub_from_path, input_file, output_dir)?;
 
     // Translates the folder in place. Only files that need to be translated will be modified
     translate_folder(
@@ -68,6 +96,7 @@ pub async fn translate_epub_to_folder(
         source_lang,
         concurrent_requests,
         config,
+        verbose,
     )
     .await?;
 
@@ -111,10 +140,13 @@ pub async fn translate_folder(
     source_lang: Option<String>,
     concurrent_requests: usize,
     config: DeepLConfiguration,
+    verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create semaphore to control the number of concurrent requests
     let semaphore = Arc::new(Semaphore::new(concurrent_requests));
     let retries = 3;
+
+    let start = Instant::now();
 
     let xhtml_files = get_xhtml_paths(dir_path)?;
 
@@ -135,6 +167,14 @@ pub async fn translate_folder(
 
     let mut tasks = Vec::new();
 
+    let end_preprocessing = Instant::now();
+    let preprocessing_duration = start - end_preprocessing;
+    profiling_log!(
+        verbose,
+        "Preprocessing duration: {:?}",
+        preprocessing_duration
+    );
+
     // Translate text nodes
     for node in nodes {
         if let NodeData::Text { contents } = &node.data {
@@ -151,7 +191,7 @@ pub async fn translate_folder(
 
                     let mut remaining_attemps = retries;
                     while remaining_attemps > 0 {
-                        match translate(&config_clone, &text, &target_lang).await {
+                        match translate(&config_clone, &text, &target_lang, verbose).await {
                             Ok(translated) => return Some(translated),
                             Err(e) => {
                                 if !remaining_attemps > 0 {
@@ -184,9 +224,21 @@ pub async fn translate_folder(
         }
     }
 
+    let end_translation = Instant::now();
+    let translation_duration = end_translation - end_preprocessing;
+    profiling_log!(verbose, "Translation duration: {:?}", translation_duration);
+
     for (document, path) in &documents {
         serialize_document(&document, &path)?;
     }
+
+    let end_serialization = Instant::now();
+    let serialization_duration = end_serialization - end_translation;
+    profiling_log!(
+        verbose,
+        "Serialization duration: {:?}",
+        serialization_duration
+    );
 
     Ok(())
 }
@@ -223,6 +275,7 @@ mod tests {
             source_lang,
             parallel,
             config,
+            true,
         )
         .await?;
 

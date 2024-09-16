@@ -13,14 +13,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let text_to_translate = "Hello, world!";
 
-    let translated_text = deepl::translate(&config, &text_to_translate, "ES").await?;
+    let translated_text = deepl::translate(&config, &text_to_translate, "ES", true).await?;
 
     println!(
         "Text: {} got translated to {}",
         text_to_translate, translated_text
     );
 
-    let usage = deepl::get_usage(&config).await?;
+    let usage = deepl::get_usage(&config, true).await?;
 
     println!("Usage: {:?}", usage);
 

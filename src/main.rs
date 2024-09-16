@@ -2,6 +2,9 @@ use epub_translator::deepl::models::DeepLConfiguration;
 use epub_translator::deepl::{get_languages, get_test_config, get_usage, start_deepl_server};
 use epub_translator::{count_epub_char, translate_epub};
 
+#[macro_use]
+extern crate epub_translator;
+
 use clap::Parser;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -29,6 +32,10 @@ struct Args {
     /// DeepL API key (optional, defaults to DEEPL_API_KEY environment variable)
     #[arg(short = 'k', long)]
     api_key: Option<String>,
+
+    // Verbose
+    #[arg(short = 'v', long, default_value_t = false)]
+    verbose: bool,
 
     /// Use test configuration, call to mock server
     #[arg(long)]
@@ -88,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Double check if mock server is running
     if args.test {
-        match get_usage(&config).await {
+        match get_usage(&config, args.verbose).await {
             Ok(_) => println!("Mock server is running correctly."),
             Err(e) => {
                 eprintln!("Error: The mock server is not running or not responding correctly.");
@@ -100,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Test languages code
-    let languages = get_languages(&config).await?;
+    let languages = get_languages(&config, args.verbose).await?;
     if !languages.0.iter().any(|l| l.language == args.target_lang) {
         eprintln!("Error: Target language code not supported");
         eprintln!(
@@ -121,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let char_count = count_epub_char(&args.input_file)?;
     println!("Number of characters to translate: {}", char_count);
 
-    let usage = get_usage(&config).await?;
+    let usage = get_usage(&config, args.verbose).await?;
 
     // Show user the usage and the char count
     println!(
@@ -147,6 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.source_lang,
         args.parallel,
         config,
+        args.verbose,
     )
     .await
     {
@@ -157,8 +165,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let translate_duration = start.elapsed();
-    eprintln!("=======> Translate duration: {:?}", translate_duration);
+    let total_duration = start.elapsed();
+    profiling_log!(args.verbose, "Total duration: {:?}", total_duration);
 
     // Shutdown mock server if test mode
     if let Some(signal) = shutdown_mock_server_signal {
