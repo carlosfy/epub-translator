@@ -25,7 +25,7 @@ pub async fn translate_epub(
     output_file: &Path,
     target_lang: &str,
     source_lang: Option<String>,
-    parallel: usize,
+    concurrent_requests: usize,
     config: DeepLConfiguration,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create a temporary directory
@@ -36,7 +36,7 @@ pub async fn translate_epub(
     unzip_epub_from_path(input_file, temp_dir_path)?;
 
     // Create semaphore to control the number of concurrent requests
-    let semaphore = Arc::new(Semaphore::new(parallel as usize));
+    let semaphore = Arc::new(Semaphore::new(concurrent_requests));
     let retries = 3;
 
     // Create iterator over all xhtml files
@@ -148,13 +148,100 @@ pub fn count_epub_char(epub_path: &Path) -> Result<usize, Box<dyn std::error::Er
     Ok(counter)
 }
 
+// Translates the text content of all xhtml files of a folder
+pub async fn translate_folder(
+    dir_path: &Path,
+    target_lang: &str,
+    source_lang: Option<String>,
+    concurrent_requests: usize,
+    config: DeepLConfiguration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Create semaphore to control the number of concurrent requests
+    let semaphore = Arc::new(Semaphore::new(concurrent_requests));
+    let retries = 3;
+
+    let xhtml_files = get_xhtml_paths(dir_path)?;
+
+    let documents = xhtml_files
+        .map(|file| {
+            let file_path = PathBuf::from(file);
+            let document = get_document_node_from_path(&file_path).unwrap(); // Care about this
+            (document, file_path)
+        })
+        .collect::<Vec<(Rc<Node>, PathBuf)>>();
+
+    // Get all text nodes from all documents, having all together in the same iterator
+    // allows to parallelize across all documents, so more threads can be used.
+    let nodes = documents
+        .iter()
+        .flat_map(|(document, _)| get_text_nodes(&document).unwrap())
+        .collect::<Vec<Rc<Node>>>();
+
+    let mut tasks = Vec::new();
+
+    // Translate text nodes
+    for node in nodes {
+        if let NodeData::Text { contents } = &node.data {
+            let text = contents.borrow().to_string();
+            if !text.trim().is_empty() {
+                let config_clone = config.clone();
+                let target_lang = target_lang.to_string();
+                let semaphore_clone = semaphore.clone();
+
+                let task = tokio::spawn(async move {
+                    let _permit = semaphore_clone.acquire().await.unwrap();
+                    let permits_available = semaphore_clone.available_permits();
+                    eprintln!("Permits available: {}", permits_available);
+
+                    let mut remaining_attemps = retries;
+                    while remaining_attemps > 0 {
+                        match translate(&config_clone, &text, &target_lang).await {
+                            Ok(translated) => return Some(translated),
+                            Err(e) => {
+                                if !remaining_attemps > 0 {
+                                    eprintln!(
+                                        "Error translating text: |{}|, error: {}. No more retries",
+                                        &text, e
+                                    );
+                                    return None;
+                                }
+                                eprintln!("Error translating text: |{}|, error: {}, remaining attempts: {}", &text, e, remaining_attemps);
+                                remaining_attemps -= 1;
+                            }
+                        }
+                    }
+                    None
+                });
+
+                tasks.push((node, task));
+            }
+        }
+    }
+
+    // Wait for all tasks to finish
+    for (node, task) in tasks {
+        if let Some(translated) = task.await? {
+            if let NodeData::Text { contents } = &node.data {
+                let mut text = contents.borrow_mut();
+                *text = StrTendril::from(translated);
+            }
+        }
+    }
+
+    for (document, path) in &documents {
+        serialize_document(&document, &path)?;
+    }
+
+    Ok(())
+}
+
 // Translates an EPUB file to a folder, for testing purposes
 pub async fn translate_epub_to_folder(
     input_file: &Path,
     output_dir: &Path,
     target_lang: &str,
     source_lang: Option<String>,
-    parallel: u8,
+    concurrent_requests: usize,
     config: DeepLConfiguration,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Unzip it into a temporary directory
