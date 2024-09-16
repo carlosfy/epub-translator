@@ -25,24 +25,99 @@ pub async fn translate_epub(
     output_file: &Path,
     target_lang: &str,
     source_lang: Option<String>,
-    parallel: usize,
+    concurrent_requests: usize,
     config: DeepLConfiguration,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create a temporary directory
     let temp_dir = tempdir()?;
     let temp_dir_path = temp_dir.path();
 
-    // Unzip it into a temporary directory
-    unzip_epub_from_path(input_file, temp_dir_path)?;
+    // Translates the content of the EPUB file into a temporary directory
+    translate_epub_to_folder(
+        input_file,
+        temp_dir_path,
+        target_lang,
+        source_lang,
+        concurrent_requests,
+        config,
+    )
+    .await?;
 
-    // Create semaphore to control the number of concurrent requests
-    let semaphore = Arc::new(Semaphore::new(parallel as usize));
-    let retries = 3;
+    // Zip the temporary directory into the output file
+    zip_folder_to_epub(temp_dir_path, output_file)?;
+
+    Ok(())
+}
+
+// Unzips an EPUB folder into it and translate its content.
+pub async fn translate_epub_to_folder(
+    input_file: &Path,
+    output_dir: &Path,
+    target_lang: &str,
+    source_lang: Option<String>,
+    concurrent_requests: usize,
+    config: DeepLConfiguration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Unzips the epub to the output_dir
+    unzip_epub_from_path(input_file, output_dir)?;
+
+    // Translates the folder in place. Only files that need to be translated will be modified
+    translate_folder(
+        output_dir,
+        target_lang,
+        source_lang,
+        concurrent_requests,
+        config,
+    )
+    .await?;
+
+    Ok(())
+}
+
+// Counts the number of characters to translate in an EPUB file
+// This could be done in parallel, but it's not a bottleneck
+pub fn count_epub_char(epub_path: &Path) -> Result<usize, Box<dyn std::error::Error>> {
+    // Create a temporary directory
+    let temp_dir = tempdir()?;
+    let temp_dir_path = temp_dir.path();
+
+    // Unzip it into a temporary directory
+    unzip_epub_from_path(epub_path, temp_dir_path)?;
 
     // Create iterator over all xhtml files
     let xhtml_files = get_xhtml_paths(temp_dir_path)?;
 
-    // Get all root nodes, to then serialize them
+    let mut counter = 0;
+
+    for xhtml_file in xhtml_files {
+        let nodes = get_text_nodes_from_path(&PathBuf::from(xhtml_file))?;
+
+        for handle in nodes {
+            if let NodeData::Text { contents } = &handle.data {
+                let text = contents.borrow();
+                counter += text.len();
+            }
+        }
+    }
+
+    Ok(counter)
+}
+
+// Translates the text content of all xhtml files of a folder
+// This is the core function
+pub async fn translate_folder(
+    dir_path: &Path,
+    target_lang: &str,
+    source_lang: Option<String>,
+    concurrent_requests: usize,
+    config: DeepLConfiguration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Create semaphore to control the number of concurrent requests
+    let semaphore = Arc::new(Semaphore::new(concurrent_requests));
+    let retries = 3;
+
+    let xhtml_files = get_xhtml_paths(dir_path)?;
+
     let documents = xhtml_files
         .map(|file| {
             let file_path = PathBuf::from(file);
@@ -113,82 +188,12 @@ pub async fn translate_epub(
         serialize_document(&document, &path)?;
     }
 
-    // Zip the temporary directory into the output file
-    zip_folder_to_epub(temp_dir_path, output_file)?;
-
-    Ok(())
-}
-
-// Counts the number of characters to translate in an EPUB file
-// This could be done in parallel, but it's not a bottleneck
-pub fn count_epub_char(epub_path: &Path) -> Result<usize, Box<dyn std::error::Error>> {
-    // Create a temporary directory
-    let temp_dir = tempdir()?;
-    let temp_dir_path = temp_dir.path();
-
-    // Unzip it into a temporary directory
-    unzip_epub_from_path(epub_path, temp_dir_path)?;
-
-    // Create iterator over all xhtml files
-    let xhtml_files = get_xhtml_paths(temp_dir_path)?;
-
-    let mut counter = 0;
-
-    for xhtml_file in xhtml_files {
-        let nodes = get_text_nodes_from_path(&PathBuf::from(xhtml_file))?;
-
-        for handle in nodes {
-            if let NodeData::Text { contents } = &handle.data {
-                let text = contents.borrow();
-                counter += text.len();
-            }
-        }
-    }
-
-    Ok(counter)
-}
-
-// Translates an EPUB file to a folder, for testing purposes
-pub async fn translate_epub_to_folder(
-    input_file: &Path,
-    output_dir: &Path,
-    target_lang: &str,
-    source_lang: Option<String>,
-    parallel: u8,
-    config: DeepLConfiguration,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Unzip it into a temporary directory
-    unzip_epub_from_path(input_file, output_dir)?;
-
-    // Create iterator over all xhtml files
-    let xhtml_files = get_xhtml_paths(output_dir)?;
-
-    for file in xhtml_files {
-        let file_path = PathBuf::from(file);
-        // Get text nodes from all xhtml files
-        let document = get_document_node_from_path(&file_path)?;
-        let nodes = get_text_nodes(&document)?;
-
-        // Translate text nodes
-        for node in nodes {
-            if let NodeData::Text { contents } = &node.data {
-                let mut text = contents.borrow_mut();
-                if !text.trim().is_empty() {
-                    let translated = translate(&config, &text, target_lang).await?;
-                    *text = StrTendril::from(translated);
-                }
-            }
-        }
-
-        // Serialize the xhtml files
-        serialize_document(&document, &file_path)?;
-    }
-
     Ok(())
 }
 
 // Integration test for the whole process.
-
+// It creates a mock server that will be used by all the other tests that need it.
+// So this test should be the last one to end.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,11 +229,13 @@ mod tests {
         let duration = start.elapsed();
         eprintln!("=========> Time taken {:?}", duration);
 
+        // Check the format of the translated epub
         epubcheck(&output_file)?;
 
-        // Wait for the mock server to finish to other tests
+        // Wait one extra second to be sure that other tests have finished.
         tokio::time::sleep(Duration::from_millis(1000)).await;
 
+        // Shut down mock server
         shutdown_signal.send(()).unwrap();
 
         Ok(())
