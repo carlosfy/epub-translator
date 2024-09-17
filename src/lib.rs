@@ -176,6 +176,18 @@ pub async fn translate_folder(
         preprocessing_duration
     );
 
+    // Create a progress bar
+    let progress_bar =
+        ProgressBar::with_draw_target(Some((nodes.len() + 1) as u64), ProgressDrawTarget::stdout());
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({percent}%)")
+            .unwrap()
+            .progress_chars("##-"),
+    );
+
+    progress_bar.inc(1);
+
     // Translate text nodes
     for (i, node) in nodes.iter().enumerate() {
         if let NodeData::Text { contents } = &node.data {
@@ -215,16 +227,6 @@ pub async fn translate_folder(
             }
         }
     }
-
-    // Create a progress bar
-    let progress_bar =
-        ProgressBar::with_draw_target(Some(tasks.len() as u64), ProgressDrawTarget::stdout());
-    progress_bar.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({percent}%)")
-            .unwrap()
-            .progress_chars("##-"),
-    );
 
     // Wait for all tasks to finish
     for (node, task) in tasks {
