@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use epub::{get_xhtml_paths, unzip_epub_from_path, zip_folder_to_epub};
+use reqwest::Client;
 use xhtml::{
     get_document_node_from_path, get_text_nodes, get_text_nodes_from_path, serialize_document,
 };
@@ -146,6 +147,7 @@ pub async fn translate_folder(
     // Create semaphore to control the number of concurrent requests
     let semaphore = Arc::new(Semaphore::new(concurrent_requests));
     let retries = 3;
+    let client = Client::new();
 
     let start = Instant::now();
 
@@ -197,6 +199,7 @@ pub async fn translate_folder(
                 let config_clone = config[config_index].clone();
                 let target_lang = target_lang.to_string();
                 let semaphore_clone = semaphore.clone();
+                let client = client.clone();
 
                 let task = tokio::spawn(async move {
                     let _permit = semaphore_clone.acquire().await.unwrap();
@@ -205,7 +208,8 @@ pub async fn translate_folder(
 
                     let mut remaining_attemps = retries;
                     while remaining_attemps > 0 {
-                        match translate(&config_clone, &text, &target_lang, verbose).await {
+                        match translate(&config_clone, &text, &target_lang, verbose, &client).await
+                        {
                             Ok(translated) => return Some(translated),
                             Err(e) => {
                                 if !remaining_attemps > 0 {

@@ -45,6 +45,7 @@ pub async fn translate(
     text: &str,
     target_lang: &str,
     verbose: bool,
+    client: &Client,
 ) -> Result<String, Box<dyn Error>> {
     api_log!(
         verbose,
@@ -52,8 +53,6 @@ pub async fn translate(
         text,
         target_lang
     );
-
-    let client = Client::new();
 
     let body = TranslationRequest {
         text: vec![text.to_string()],
@@ -212,7 +211,9 @@ mod tests {
 
         let config = get_test_config();
 
-        let translate_result = translate(&config, "Hello", "ES", true).await?;
+        let client = Client::new();
+
+        let translate_result = translate(&config, "Hello", "ES", true, &client).await?;
         let usage_result = get_usage(&config, true).await?;
         let languages_result = get_languages(&config, true).await?;
 

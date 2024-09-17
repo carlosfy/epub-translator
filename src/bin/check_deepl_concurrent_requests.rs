@@ -1,5 +1,6 @@
 use deepl::models::DeepLConfiguration;
 use epub_translator::deepl;
+use reqwest::Client;
 use std::env;
 
 use std::error::Error;
@@ -20,12 +21,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let semaphore = Arc::new(Semaphore::new(CONCURRENT_REQUESTS));
     let barrier = Arc::new(Barrier::new(CONCURRENT_REQUESTS));
 
+    let client = Arc::new(Client::new());
+
     let mut handles = Vec::new();
 
     for i in 0..CONCURRENT_REQUESTS {
         let config = Arc::clone(&config);
         let semaphore = Arc::clone(&semaphore);
         let barrier = Arc::clone(&barrier);
+
+        let client = client.clone();
 
         let task = tokio::spawn(async move {
             println!("Thread {} starting", i);
@@ -40,7 +45,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let permits_available = semaphore.available_permits();
             println!("Permits available: {}, thread: {}", permits_available, i);
-            deepl::translate(&config, &TEXT_TO_TRANSLATE, "ES", true)
+            deepl::translate(&config, &TEXT_TO_TRANSLATE, "ES", true, &client)
                 .await
                 .ok()
         });

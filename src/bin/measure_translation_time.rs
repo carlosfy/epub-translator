@@ -1,6 +1,7 @@
 use csv::ReaderBuilder;
 use epub_translator::deepl::models::DeepLConfiguration;
 use epub_translator::deepl::translate;
+use reqwest::Client;
 use std::fs::File;
 use std::io::BufReader;
 use std::time::Instant;
@@ -10,6 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let csv_file_path = "tests/benchmark/data/input.csv";
     let key = std::env::var("DEEPL_API_KEY").expect("DEEPL_API_KEY must be set");
     let config = DeepLConfiguration::new(key, false);
+    let client = Client::new();
 
     let file = File::open(csv_file_path)?;
     let reader = BufReader::new(file);
@@ -30,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let char_count = text.chars().count();
 
         let start = Instant::now();
-        let translated = translate(&config, text, target_lang, true).await?;
+        let translated = translate(&config, text, target_lang, true, &client).await?;
         let duration = start.elapsed();
         let dpc = if char_count > 0 {
             duration.as_millis() as f32 / char_count as f32

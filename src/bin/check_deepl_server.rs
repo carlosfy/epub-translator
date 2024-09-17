@@ -1,5 +1,6 @@
 use deepl::models::DeepLConfiguration;
 use epub_translator::deepl;
+use reqwest::Client;
 use std::env;
 
 use std::error::Error;
@@ -13,7 +14,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let text_to_translate = "Hello, world!";
 
-    let translated_text = deepl::translate(&config, &text_to_translate, "ES", true).await?;
+    let client = Client::new();
+
+    let translated_text =
+        deepl::translate(&config, &text_to_translate, "ES", true, &client).await?;
 
     println!(
         "Text: {} got translated to {}",
