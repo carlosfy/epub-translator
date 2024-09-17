@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Get API key from env variable
     let api_key = env::var("DEEPL_API_KEY").expect("DEEP_API_KEY environment variable not set");
 
-    let config = DeepLConfiguration::new_with_determine(&api_key).await?;
+    let config = DeepLConfiguration::new_with_determine(api_key).await?;
 
     let text_to_translate = "Hello, world!";
 

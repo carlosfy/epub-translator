@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let start = Instant::now();
     // Get API key from env variable
     let api_key = env::var("DEEPL_API_KEY").expect("DEEP_API_KEY environment variable not set");
-    let config = Arc::new(DeepLConfiguration::new_with_determine(&api_key).await?);
+    let config = Arc::new(DeepLConfiguration::new_with_determine(api_key).await?);
 
     let semaphore = Arc::new(Semaphore::new(CONCURRENT_REQUESTS));
     let barrier = Arc::new(Barrier::new(CONCURRENT_REQUESTS));

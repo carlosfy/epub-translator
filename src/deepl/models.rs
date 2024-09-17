@@ -52,8 +52,8 @@ impl DeepLConfiguration {
         }
     }
 
-    pub async fn new_with_determine(auth_key: &str) -> Result<Self, Box<dyn Error>> {
-        let is_pro = Self::determine_api_type(auth_key).await?;
+    pub async fn new_with_determine(auth_key: String) -> Result<Self, Box<dyn Error>> {
+        let is_pro = Self::determine_api_type(&auth_key).await?;
         Ok(Self::new(auth_key.to_string(), is_pro))
     }
 
