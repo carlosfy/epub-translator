@@ -52,7 +52,7 @@ pub async fn translate_epub(
     target_lang: &str,
     source_lang: Option<String>,
     concurrent_requests: usize,
-    config: DeepLConfiguration,
+    config: Vec<Arc<DeepLConfiguration>>,
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create a temporary directory
@@ -84,7 +84,7 @@ pub async fn translate_epub_to_folder(
     target_lang: &str,
     source_lang: Option<String>,
     concurrent_requests: usize,
-    config: DeepLConfiguration,
+    config: Vec<Arc<DeepLConfiguration>>,
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Unzips the epub to the output_dir
@@ -140,7 +140,7 @@ pub async fn translate_folder(
     target_lang: &str,
     source_lang: Option<String>,
     concurrent_requests: usize,
-    config: DeepLConfiguration,
+    config: Vec<Arc<DeepLConfiguration>>,
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create semaphore to control the number of concurrent requests
@@ -169,19 +169,32 @@ pub async fn translate_folder(
     let mut tasks = Vec::new();
 
     let end_preprocessing = Instant::now();
-    let preprocessing_duration = start - end_preprocessing;
+    let preprocessing_duration = end_preprocessing - start;
     profiling_log!(
         verbose,
         "Preprocessing duration: {:?}",
         preprocessing_duration
     );
 
+    // Create a progress bar
+    let progress_bar =
+        ProgressBar::with_draw_target(Some((nodes.len() + 1) as u64), ProgressDrawTarget::stdout());
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({percent}%)")
+            .unwrap()
+            .progress_chars("##-"),
+    );
+
+    progress_bar.inc(1);
+
     // Translate text nodes
-    for node in nodes {
+    for (i, node) in nodes.iter().enumerate() {
         if let NodeData::Text { contents } = &node.data {
             let text = contents.borrow().to_string();
             if !text.trim().is_empty() {
-                let config_clone = config.clone();
+                let config_index = i % config.len();
+                let config_clone = config[config_index].clone();
                 let target_lang = target_lang.to_string();
                 let semaphore_clone = semaphore.clone();
 
@@ -214,16 +227,6 @@ pub async fn translate_folder(
             }
         }
     }
-
-    // Create a progress bar
-    let progress_bar =
-        ProgressBar::with_draw_target(Some(tasks.len() as u64), ProgressDrawTarget::stdout());
-    progress_bar.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({percent}%)")
-            .unwrap()
-            .progress_chars("##-"),
-    );
 
     // Wait for all tasks to finish
     for (node, task) in tasks {
@@ -277,6 +280,7 @@ mod tests {
         let source_lang: Option<String> = None;
         let parallel = 1000;
         let config = get_test_config();
+        let configurations = vec![Arc::new(config)];
 
         let shutdown_signal = start_deepl_server().await?;
 
@@ -287,7 +291,7 @@ mod tests {
             target_lang,
             source_lang,
             parallel,
-            config,
+            configurations,
             true,
         )
         .await?;
