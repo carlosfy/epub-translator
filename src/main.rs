@@ -207,7 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match translate_epub(
         &args.input_file,
         &args.output_file,
-        &args.target_lang,
+        args.target_lang.to_string(),
         args.source_lang,
         args.parallel,
         balanced_configurations,
