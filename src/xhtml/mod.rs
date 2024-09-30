@@ -86,18 +86,28 @@ pub fn serialize_document_to_string(
 
     // Change `>` to `/>` in self closing tags
     let self_closing_tags = ["br", "hr", "img", "input", "link", "meta"];
-    for tag in self_closing_tags.iter() {
-        let re = Regex::new(&format!(r"(<{}[^>]*?)>", tag).to_string())?;
-        output_string = re.replace_all(&output_string, "$1/>").to_string();
-    }
+    let tags_pattern = self_closing_tags.join("|");
 
-    // Todo: test
+    // Fix Bug n.4
+    let re_self_closing = Regex::new(&format!(r"<({})([^>]*?)>", tags_pattern))?;
+    output_string = re_self_closing
+        .replace_all(&output_string, "<$1$2/>")
+        .to_string();
+
+    // Fix Bug n.3
     let re_nbsp = Regex::new(r"&nbsp;")?;
     output_string = re_nbsp.replace_all(&output_string, "\u{00A0}").to_string();
 
-    // Todo replace empty spans by selfclosing spans?
+    // Fix Bug n.2
     let re_span = Regex::new(r"<span([^>]*?)></span>")?;
     output_string = re_span.replace_all(&output_string, "<span$1/>").to_string();
+
+    // Fix Bug n.5
+    let re_em = Regex::new(r"([^>\s])(</?em>)([^<\s])")?;
+    output_string = re_em.replace_all(&output_string, "$1 $2$3").to_string();
+
+    let re_a = Regex::new(r"([^>\s])(</?a [^>]*?>)([^<\s])")?;
+    output_string = re_a.replace_all(&output_string, "$1 $2$3").to_string();
 
     Ok(output_string)
 }

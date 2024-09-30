@@ -102,3 +102,36 @@ FATAL(RSC-016): file.xhtml(x,y): Fatal Error while parsing file: The entity "nbs
 let re_nbsp = Regex::new(r"&nbsp;")?;
 let content = re_nbsp.replace_all(&content, "\u{00A0}").to_string();
 ```
+
+## 4. Self-closing tags serialized without proper XHTML format
+
+**Library**: html5ever 0.26
+
+**Description**: When serializing XHTML, self closing tags like `br`, `hr`, `img`, `input`, `link`, `meta`, get serialized as `<tag [attributes]>` instead of XHTML-compliant `<tag [attributes] />`. While this output is valid XML, it does not meet the stricter XHTML requirements used in EPUB format.
+
+**Workaround**: Pattern match.
+```rust
+// Change `>` to `/>` in self closing tags
+let self_closing_tags = ["br", "hr", "img", "input", "link", "meta"];
+for tag in self_closing_tags.iter() {
+    let re = Regex::new(&format!(r"(<{}[^>]*?)>", tag).to_string())?;
+    output_string = re.replace_all(&output_string, "$1/>").to_string();
+}
+```
+
+## 5. Whitespace trimming in `em` and `a` tags causes word juxtaposition
+
+**Library**: html5ever 0.26
+
+**Description**: During the translation process, the content of these tags, often a single word, get's trimmed. 
+
+**Example** The original text `what’s <em>morally</em>` might become `es<em>moralmente</em>`. which would be rendered as `esmoralmente` in the e-reader.
+
+**Workaround**: Use regex pattern matching to ensure proper spacing around these tags.
+```rust
+ let re_em = Regex::new(r"([^>\s])(</?em>)([^<\s])")?;
+output_string = re_em.replace_all(&output_string, "$1 $2$3").to_string();
+
+let re_a = Regex::new(r"([^>\s])(</?a [^>]*?>)([^<\s])")?;
+output_string = re_a.replace_all(&output_string, "$1 $2$3").to_string();
+``` 
