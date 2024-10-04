@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let client = Client::new();
 
     let translated_text =
-        deepl::translate(&config, &text_to_translate, "ES", true, &client).await?;
+        deepl::translate(&config, &text_to_translate, "ES", true, &client, 1).await?;
 
     println!(
         "Text: {} got translated to {}",

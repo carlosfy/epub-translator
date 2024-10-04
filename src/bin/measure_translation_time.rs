@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reader = BufReader::new(file);
     let mut csv_reader = ReaderBuilder::new().has_headers(true).from_reader(reader);
 
-    for result in csv_reader.records() {
+    for (record_id, result) in csv_reader.records().enumerate() {
         let record = result?;
 
         if record.len() != 3 {
@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let char_count = text.chars().count();
 
         let start = Instant::now();
-        let translated = translate(&config, text, target_lang, true, &client).await?;
+        let translated = translate(&config, text, target_lang, true, &client, record_id).await?;
         let duration = start.elapsed();
         let dpc = if char_count > 0 {
             duration.as_millis() as f32 / char_count as f32
