@@ -38,7 +38,6 @@ macro_rules! mock_log {
     };
 }
 
-// TODO: Rewrite taking client as parameter
 // translate.sh
 pub async fn translate(
     config: &DeepLConfiguration,
