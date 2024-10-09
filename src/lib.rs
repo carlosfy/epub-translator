@@ -20,7 +20,10 @@ use html5ever::tendril::StrTendril;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use markup5ever_rcdom::{Node, NodeData};
 use tempfile::tempdir;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{
+    mpsc::{self, Sender},
+    Semaphore,
+};
 
 #[macro_export]
 macro_rules! profiling_log {
@@ -144,12 +147,64 @@ struct TranslationResult {
     translated_text: Option<String>,
 }
 
+/// Handles a single translation task asynchronously.
+///
+/// This function is designed to be thread-agnostic and lightweight, making it easily portable.
+/// It performs the following steps:
+/// 1. Acquires a permit from the semaphore to limit concurrent requests.
+/// 2. Calls the external translation API using the `translate` function.
+/// 3. Sends the translation result back to the writer through a channel.
+///
+/// # Error Handling
+/// - If translation fails, it logs the error and sends a result with `None` for the translated text.
+/// - If sending the result back to the writer fails, it logs the error.
+async fn translation_task(
+    id: usize,
+    text: String,
+    target_lang: Arc<String>,
+    semaphore: Arc<Semaphore>,
+    tx_writer: Sender<TranslationResult>,
+    configuration: Arc<DeepLConfiguration>,
+    client: Client,
+) {
+    eprintln!("[{}] [Task] Start of translation id", id);
+    let out_permit = semaphore.acquire().await.unwrap();
+    let remaining_permits = semaphore.available_permits();
+    eprintln!(
+        "[{}] [Task] Took permit, remaining permits: {}",
+        id, remaining_permits
+    );
+    let translation_result =
+        match translate(&configuration, &text, &target_lang, true, &client, id).await {
+            Ok(translated_text) => {
+                // Drop permit
+                TranslationResult {
+                    id: id,
+                    translated_text: Some(translated_text),
+                }
+            }
+            Err(error) => {
+                println!("[{}] [Task] Error translating node: {}", id, error);
+                TranslationResult {
+                    id: id,
+                    translated_text: None,
+                }
+            }
+        };
+    drop(out_permit);
+
+    if let Err(e) = tx_writer.send(translation_result).await {
+        eprintln!("Failed to send translation result to writer: {}", e);
+    }
+    eprintln!("[{}] [Task] End of translation", id);
+}
+
 // Translates the text content of all xhtml files of a folder
 // This is the core function
 pub async fn translate_folder(
     dir_path: &Path,
     target_lang: String,
-    source_lang: Option<String>,
+    _source_lang: Option<String>,
     concurrent_requests: usize,
     config: Vec<Arc<DeepLConfiguration>>,
     verbose: bool,
@@ -226,48 +281,15 @@ pub async fn translate_folder(
             let target_lang = target_lang.clone();
 
             let semaphore = semaphore.clone();
-            let _task = tokio::spawn(async move {
-                eprintln!("[{}] [Task] Start of translation id", request.id);
-                let out_permit = semaphore.acquire().await.unwrap();
-                let remaining_permits = semaphore.available_permits();
-                eprintln!(
-                    "[{}] [Task] Took permit, remaining permits: {}",
-                    request.id, remaining_permits
-                );
-                // let _permit = semaphore.acquire().await.unwrap();
-                let translation_result = match translate(
-                    &configuration,
-                    &request.text,
-                    &target_lang,
-                    true,
-                    &client,
-                    request.id,
-                )
-                .await
-                {
-                    Ok(translated_text) => {
-                        // Drop permit
-                        TranslationResult {
-                            id: request.id,
-                            translated_text: Some(translated_text),
-                        }
-                    }
-                    Err(error) => {
-                        println!("[{}] [Task] Error translating node: {}", request.id, error);
-                        TranslationResult {
-                            id: request.id,
-                            translated_text: None,
-                        }
-                    }
-                };
-                drop(out_permit);
-
-                if let Err(e) = tx_writer.send(translation_result).await {
-                    eprintln!("Failed to send translation result to writer: {}", e);
-                }
-                eprintln!("[{}] [Task] End of translation", request.id);
-                // drop(out_permit);
-            });
+            let _task = tokio::spawn(translation_task(
+                request.id,
+                request.text,
+                target_lang,
+                semaphore,
+                tx_writer,
+                configuration,
+                client,
+            ));
         }
         eprintln!("[Translator] End of all task")
     });
@@ -288,7 +310,7 @@ pub async fn translate_folder(
         .collect();
 
     // Initial send of all requests
-    // Create first the translator, seems to fail when sending all before nobody is listening.
+    // Create first the translator, seems to fail when sending all before the translator is listening.
     for (id, text) in texts_enumerated.iter() {
         eprintln!("[{}] Sending request to Translator", id);
         if let Err(error) = tx_translator
