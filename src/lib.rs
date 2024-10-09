@@ -5,6 +5,7 @@ pub mod xhtml;
 use crate::deepl::models::DeepLConfiguration;
 use crate::deepl::translate;
 
+use std::borrow::Borrow;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -139,12 +140,12 @@ pub fn count_epub_char(epub_path: &Path) -> Result<usize, Box<dyn std::error::Er
 
 struct TranslationRequest {
     id: usize,
-    text: String,
+    text: Arc<String>,
 }
 
 struct TranslationResult {
     id: usize,
-    translated_text: Option<String>,
+    translated_text: Arc<Option<String>>,
 }
 
 /// Handles a single translation task asynchronously.
@@ -160,7 +161,7 @@ struct TranslationResult {
 /// - If sending the result back to the writer fails, it logs the error.
 async fn translation_task(
     id: usize,
-    text: String,
+    text: Arc<String>,
     target_lang: Arc<String>,
     semaphore: Arc<Semaphore>,
     tx_writer: Sender<TranslationResult>,
@@ -180,14 +181,14 @@ async fn translation_task(
                 // Drop permit
                 TranslationResult {
                     id: id,
-                    translated_text: Some(translated_text),
+                    translated_text: Arc::new(Some(translated_text)),
                 }
             }
             Err(error) => {
                 println!("[{}] [Task] Error translating node: {}", id, error);
                 TranslationResult {
                     id: id,
-                    translated_text: None,
+                    translated_text: Arc::new(None),
                 }
             }
         };
@@ -296,15 +297,15 @@ pub async fn translate_folder(
 
     let mut completed = 0;
 
-    let texts_enumerated: Vec<(usize, String)> = nodes
+    let texts_enumerated: Vec<(usize, Arc<String>)> = nodes
         .iter()
         .enumerate()
         .map(|(id, node)| {
             if let NodeData::Text { contents } = &node.data {
                 let text = contents.borrow().to_string();
-                (id, text)
+                (id, Arc::new(text))
             } else {
-                (id, String::new())
+                (id, Arc::new(String::new()))
             }
         })
         .collect();
@@ -316,7 +317,7 @@ pub async fn translate_folder(
         if let Err(error) = tx_translator
             .send(TranslationRequest {
                 id: *id,
-                text: text.to_string(),
+                text: text.clone(),
             })
             .await
         {
@@ -336,10 +337,10 @@ pub async fn translate_folder(
             "[{}] [Writer] Received: {}, Received result: {:?}",
             id, completed, translated_text
         );
-        if let Some(translated_text) = translated_text {
+        if let Some(translated_text) = translated_text.borrow() {
             if let NodeData::Text { contents } = &nodes[id].data {
                 let mut text = contents.borrow_mut();
-                *text = StrTendril::from(translated_text);
+                *text = StrTendril::from_slice(translated_text);
                 completed += 1;
                 progress_bar.inc(1);
             }
@@ -350,7 +351,7 @@ pub async fn translate_folder(
                 if let Err(error) = tx_translator
                     .send(TranslationRequest {
                         id: *id,
-                        text: text.to_string(),
+                        text: text.clone(),
                     })
                     .await
                 {
