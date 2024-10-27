@@ -341,6 +341,7 @@ pub async fn translate_folder(
         {
             eprintln!("[{}] Error sending message to translator: {}", id, error);
             completed += 1;
+            progress_bar.inc(1);
         };
     }
 
@@ -382,6 +383,7 @@ pub async fn translate_folder(
                 {
                     eprintln!("[{}] Error sending message to translator: {}", id, error);
                     completed += 1;
+                    progress_bar.inc(1);
                 };
             } else {
                 completed += 1;
