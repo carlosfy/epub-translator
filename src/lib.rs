@@ -65,9 +65,11 @@ pub async fn translate_epub(
     let temp_dir = tempdir()?;
     let temp_dir_path = temp_dir.path();
 
-    // Translates the content of the EPUB file into a temporary directory.
-    translate_epub_to_folder(
-        input_file,
+    // Unzips the epub to the output_dir
+    timed!(verbose, unzip_epub_from_path, input_file, temp_dir_path)?;
+
+    // Translates the folder in place. Only files that need to be translated will be modified
+    translate_folder(
         temp_dir_path,
         target_lang,
         source_lang,
@@ -79,33 +81,6 @@ pub async fn translate_epub(
 
     // Zip the temporary directory into the output file
     timed!(verbose, zip_folder_to_epub, temp_dir_path, output_file)?;
-
-    Ok(())
-}
-
-/// Unzips an EPUB folder into it and translate its content.
-pub async fn translate_epub_to_folder(
-    input_file: &Path,
-    output_dir: &Path,
-    target_lang: String,
-    source_lang: Option<String>,
-    concurrent_requests: usize,
-    config: Vec<Arc<DeepLConfiguration>>,
-    verbose: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Unzips the epub to the output_dir
-    timed!(verbose, unzip_epub_from_path, input_file, output_dir)?;
-
-    // Translates the folder in place. Only files that need to be translated will be modified
-    translate_folder(
-        output_dir,
-        target_lang,
-        source_lang,
-        concurrent_requests,
-        config,
-        verbose,
-    )
-    .await?;
 
     Ok(())
 }
@@ -253,8 +228,26 @@ async fn run_translator(
     eprintln!("[Translator] End of all task")
 }
 
-// Translates the text content of all xhtml files of a folder
-// This is the core function
+/// Core function: Translates text in all XHTML files within a folder
+///
+/// This function:
+/// 1. Creates document iterators, one per file, each as an HTML root.
+/// 2. Iterates through text nodes in each document.
+/// 3. Sets up two channels:
+///     - Translator_Channel (TranslationRequest)
+///     - Writer_Channel (TranslationResult)
+/// 4. Spawns Translator:
+///     - Listens on Translator_Channel, spawning TranslationTasks as needed
+/// 5. For each text node:
+///     - Sends a TranslationRequest to Translator
+/// 6. Spawns Writer:
+///     - Listens on Writer_Channel for TranslationResults
+///         - Modifies nodes if successful; retries if not (up to max attempts)
+///     - Closes channels when done (note: deadlock risk if incomplete)
+/// 7. Serializes documents back to files.
+///
+/// Note: Ideally, TranslationRequests would be sent post-Writer spawn, but this requires moving
+/// Writer (owner of nodes, Vec<Rc<Node>>) across threads.
 pub async fn translate_folder(
     dir_path: &Path,
     target_lang: String,
@@ -268,6 +261,7 @@ pub async fn translate_folder(
 
     let xhtml_files = get_xhtml_paths(dir_path)?;
 
+    // 1. Create document iterator
     let documents = xhtml_files
         .map(|file| {
             let file_path = PathBuf::from(file);
@@ -276,12 +270,14 @@ pub async fn translate_folder(
         })
         .collect::<Vec<(Rc<Node>, PathBuf)>>();
 
-    // Collect all text nodes from all documents into a single vector
+    // 2. Create text node iterator
     // This approach enables parallelization across all documents,
     let nodes = documents
         .iter()
         .flat_map(|(document, _)| get_text_nodes(&document).expect("Failed to get text nodes."))
         .collect::<Vec<Rc<Node>>>();
+
+    let total_nodes = nodes.len();
 
     let end_preprocessing = Instant::now();
     let preprocessing_duration = end_preprocessing - start;
@@ -291,7 +287,6 @@ pub async fn translate_folder(
         preprocessing_duration
     );
 
-    let total_nodes = nodes.len();
     // Create a progress bar
     let progress_bar =
         ProgressBar::with_draw_target(Some((total_nodes + 1) as u64), ProgressDrawTarget::stdout());
@@ -304,12 +299,13 @@ pub async fn translate_folder(
 
     progress_bar.inc(1);
 
+    // 3. Create Channels
     let writer_queue_size = 15_000;
 
     let (tx_translator, rx_translator) = mpsc::channel::<TranslationRequest>(writer_queue_size);
     let (tx_writer, mut rx_writer) = mpsc::channel::<TranslationResult>(writer_queue_size);
 
-    // Spawn a Translator
+    // 4. Spawn a Translator
     let _translator_handle = tokio::spawn(run_translator(
         configurations,
         concurrent_requests,
@@ -318,28 +314,27 @@ pub async fn translate_folder(
         tx_writer,
     ));
 
-    let texts_enumerated: Vec<(usize, Arc<String>)> = nodes
+    let texts_enumerated: Vec<Arc<String>> = nodes
         .iter()
-        .enumerate()
-        .map(|(id, node)| {
+        .map(|node| {
             if let NodeData::Text { contents } = &node.data {
                 let text = contents.borrow().to_string();
-                (id, Arc::new(text))
+                Arc::new(text)
             } else {
-                (id, Arc::new(String::new()))
+                Arc::new(String::new())
             }
         })
         .collect();
 
-    // Send initial translation requests to the Translator
+    // 5. Send initial translation requests to the Translator
     // Note: Ensure the Translator is created and listening before sending requests
     // to avoid potential failures in message transmission
     let mut completed = 0;
-    for (id, text) in texts_enumerated.iter() {
+    for (id, text) in texts_enumerated.iter().enumerate() {
         eprintln!("[{}] Sending request to Translator", id);
         if let Err(error) = tx_translator
             .send(TranslationRequest {
-                id: *id,
+                id: id,
                 text: text.clone(),
             })
             .await
@@ -351,6 +346,14 @@ pub async fn translate_folder(
 
     let mut retries: Vec<usize> = vec![0, total_nodes];
 
+    // 6. Spawn Writer
+    //
+    // Ressources:
+    // - Writer receiver `rx_writer`
+    // - Node reference `vector nodes` (Vec<Rc<Node>>)
+    // - Translator sender `tx_translator`
+    // - Progress counter `completed`
+    // - retries
     while let Some(TranslationResult {
         id,
         translated_text,
@@ -370,11 +373,10 @@ pub async fn translate_folder(
         } else {
             if retries[id] < max_retries {
                 retries[id] += 1;
-                let (id, text) = &texts_enumerated[id];
                 if let Err(error) = tx_translator
                     .send(TranslationRequest {
-                        id: *id,
-                        text: text.clone(),
+                        id: id,
+                        text: texts_enumerated[id].clone(),
                     })
                     .await
                 {
@@ -402,6 +404,7 @@ pub async fn translate_folder(
     let translation_duration = end_translation - end_preprocessing;
     profiling_log!(verbose, "Translation duration: {:?}", translation_duration);
 
+    // 7. Serialize all documents
     for (document, path) in &documents {
         serialize_document(&document, &path)?;
     }
