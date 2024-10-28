@@ -146,28 +146,37 @@ async fn translation_task(
 ) {
     eprintln!("[{}] [Task] Start of translation id", id);
     let out_permit = semaphore.acquire().await.unwrap();
-    let remaining_permits = semaphore.available_permits();
+    let available_permits = semaphore.available_permits();
     eprintln!(
         "[{}] [Task] Took permit, remaining permits: {}",
-        id, remaining_permits
+        id, available_permits
     );
-    let translation_result =
-        match translate(&configuration, &text, &target_lang, true, &client, id).await {
-            Ok(translated_text) => {
-                // Drop permit
-                TranslationResult {
-                    id: id,
-                    translated_text: Arc::new(Some(translated_text)),
-                }
+    let translation_result = match translate(
+        &configuration,
+        &text,
+        &target_lang,
+        true,
+        &client,
+        id,
+        available_permits,
+    )
+    .await
+    {
+        Ok(translated_text) => {
+            // Drop permit
+            TranslationResult {
+                id: id,
+                translated_text: Arc::new(Some(translated_text)),
             }
-            Err(error) => {
-                println!("[{}] [Task] Error translating node: {}", id, error);
-                TranslationResult {
-                    id: id,
-                    translated_text: Arc::new(None),
-                }
+        }
+        Err(error) => {
+            eprintln!("[{}] [Task] Error translating node: {}", id, error);
+            TranslationResult {
+                id: id,
+                translated_text: Arc::new(None),
             }
-        };
+        }
+    };
     drop(out_permit);
 
     if let Err(e) = tx_writer.send(translation_result).await {
@@ -225,7 +234,7 @@ async fn run_translator(
             client,
         ));
     }
-    eprintln!("[Translator] End of all task")
+    eprintln!("[Translator] End, closing channel")
 }
 
 /// Core function: Translates text in all XHTML files within a folder
@@ -287,6 +296,11 @@ pub async fn translate_folder(
         preprocessing_duration
     );
 
+    eprintln!(
+        "[TRACE]{},{},{},{},{},{},{:?}",
+        "id", "len", "error_code", "start", "request_duration", "available_permits", "thread"
+    );
+
     // Create a progress bar
     let progress_bar =
         ProgressBar::with_draw_target(Some((total_nodes + 1) as u64), ProgressDrawTarget::stdout());
@@ -331,7 +345,10 @@ pub async fn translate_folder(
     // to avoid potential failures in message transmission
     let mut completed = 0;
     for (id, text) in texts_enumerated.iter().enumerate() {
-        eprintln!("[{}] Sending request to Translator", id);
+        eprintln!(
+            "[{}] NodeContent: |{}| Sending request to Translator",
+            id, &text
+        );
         if let Err(error) = tx_translator
             .send(TranslationRequest {
                 id: id,
@@ -345,7 +362,11 @@ pub async fn translate_folder(
         };
     }
 
-    let mut retries: Vec<usize> = vec![0, total_nodes];
+    eprintln!("Total nodes: {}", total_nodes);
+
+    let mut retries: Vec<usize> = vec![0; total_nodes];
+
+    eprintln!("Actual retries length: {}", retries.len());
 
     // 6. Spawn Writer
     //
@@ -372,6 +393,7 @@ pub async fn translate_folder(
                 progress_bar.inc(1);
             }
         } else {
+            eprintln!("Actual retries length before if: {}", retries.len());
             if retries[id] < max_retries {
                 retries[id] += 1;
                 if let Err(error) = tx_translator
@@ -394,11 +416,10 @@ pub async fn translate_folder(
         // Note: This breaks the loop to avoid a deadlock scenario
         // TODO: Implement a more robust termination mechanism
         if completed == total_nodes {
+            eprintln!("END OF WRITER");
             break;
         }
     }
-
-    eprintln!("The Writer ended");
 
     progress_bar.finish_with_message("Translation completed");
 

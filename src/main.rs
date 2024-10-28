@@ -224,6 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let total_duration = start.elapsed();
     profiling_log!(args.verbose, "Total duration: {:?}", total_duration);
+    eprintln!("End");
 
     // Shutdown mock server if test mode
     if let Some(signal) = shutdown_mock_server_signal {
