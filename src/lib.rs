@@ -297,7 +297,7 @@ pub async fn translate_folder(
     );
 
     eprintln!(
-        "[TRACE]{},{},{},{},{},{},{:?}",
+        "[TRACE]{},{},{},{},{},{},{}",
         "id", "len", "error_code", "start", "request_duration", "available_permits", "thread"
     );
 
