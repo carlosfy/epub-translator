@@ -30,7 +30,7 @@ struct Args {
     source_lang: Option<String>,
 
     /// Number of parallel translation requests (default: 1)
-    #[arg(short, long, default_value_t = 1)]
+    #[arg(short, long, default_value_t = 400)]
     parallel: usize,
 
     /// DeepL API key (optional, defaults to DEEPL_API_KEY environment variable)
