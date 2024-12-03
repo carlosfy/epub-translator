@@ -2,46 +2,74 @@
 
 A Rust project for translating EPUB files using the DeepL API.
 
-## Minimum Viable Product (MVP)
+## Features
 
-This MVP focuses on the core functionality of translating EPUB files and performance. The key features include:
+- Translate EPUB files directly to another language.
+- Supports large file sizes without limitations.
+- Highly concurrent translation, supporting up to 700 translation channels (DeepL API limitations).
+- Allows the use of multiple API keys for high-volume translations.
 
-1. **EPUB Parsing**: Extract content from EPUB files.
-2. **Text Extraction**: Isolate translatable text from the EPUB structure.
-3. **DeepL API Integration**: Connect with DeepL for translation services.
-4. **Parallel Translation Processing**: Translate multiple text chunks simultaneously.
-5. **EPUB Reconstruction**: Rebuild the EPUB with translated content.
-6. **Command-Line Interface**: Provide a simple CLI for easy use.
+---
 
-### MVP Features
+## Usage
 
-- Parse and extract text from EPUB files
-- Integrate with DeepL API for translation
-- Implement parallel processing for improved performance
-- Reconstruct EPUB files with translated content
-- Provide a CLI with options for input/output files, source/target languages, and parallel processing control
+### Build the Project
 
-### Usage (Planned)
+First, build the project with `cargo`:
 
-```
-translate-epub [OPTIONS] <INPUT_FILE> <OUTPUT_FILE> -t <TARGET_LANG>
-
-ARGS:
-    <INPUT_FILE>     Path to the input EPUB file
-    <OUTPUT_FILE>    Path to the output translated EPUB file
-    <TARGET_LANG>    Target language code
-
-OPTIONS:
-    -s, --source-lang <LANG>    Source language code (optional, auto-detect if not provided)
-    -p, --parallel <NUM>        Number of parallel translation requests (default: 4)
-    -k, --api-key <KEY> DeepL API key (optional, defaults to DEEPL_API_KEY environment variable)
-    -h, --help --help Display usage information
+```bash
+cargo build --release
 ```
 
-## Development Status
+The executable will be located in the target/release directory. For a development build, you can use:
 
-This project is being optimized for performance. It works but it will be much faster.
-See performance analysis [here](./tests/benchmark/performance_analysis.ipynb)
+```bash
+cargo build
+```
+
+The executable will then be in the target/debug directory.
+
+### Command Line Usage
+
+#### Basic usage
+
+Translate EPUB file with default values to target language:
+
+```bash
+epub-translator [OPTIONS] --target-lang <TARGET_LANG> <INPUT_FILE> <OUTPUT_FILE>
+```
+
+Run `epub-translator --help` to get a detailed description of all available options.
+
+#### Test Mode (Mock DeepL API)
+
+Run the translation process using a mock server. This allows testing without using the DeepL API. The mock server will start automatically and terminate when the program ends.
+
+```bash
+epub-translator [OPTIONS] --test --target-lang <TARGET_LANG> <INPUT_FILE> <OUTPUT_FILE>
+```
+
+Example:
+
+```bash
+epub-translator --test --target-lang es book.epub translated_book.epub
+```
+
+#### Higher concurrency
+
+Increase the number of concurrent translation channels using the -p option. Note that the DeepL API becomes unstable with more than 700 channels on the free-tier API. The default is set to 400.
+
+Example, translate using 1000 concurrent channels:
+
+```bash
+epub-translator -p 1000 --target-lang es book.epub translated_book.epub
+```
+
+---
+
+## Logs
+
+Debug logs are stored in a hidden file .epub-translator-logs located in the current working directory. If you encounter issues or need detailed information about the execution, you can review this file.
 
 ## License
 
@@ -52,6 +80,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 This project uses the DeepL API for translations. Please ensure you comply with DeepL's terms of service when using this tool.
 
 ## Resources
+
 - EPUBCheck: https://github.com/w3c/epubcheck
 - EPUB 3.3 Specs: https://www.w3.org/TR/epub-33/
 - Docker image for EPUBCheck: https://hub.docker.com/repository/docker/carlosfy/epubcheck/general
+
+## Contribution
+
+Contributions are welcome! Feel free to open issues or submit pull requests.
