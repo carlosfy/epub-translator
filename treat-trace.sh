@@ -1,4 +1,5 @@
 #!/bin/bash
+# This script generates a CSV file from the logs, to analyze the performance of the application and DeepL's response time.
 
 # Check if the correct number of arguments is provided
 if [[ $# -ne 2 ]]; then
@@ -24,6 +25,11 @@ echo "$header" > "$output_file"
 
 tail -n +2 "$temp_csv_file" | while IFS=, read -r id len error_code start_1 start_2 duration permits thread; do 
     start_combined="$start_1$start_2"
+    if [[ -n $duration ]]; then
+        duration=$((duration / 1000000))
+    else
+        duration="";
+    fi
     if [[ $start_combined =~ tv_sec:\ ([0-9]+)\ tv_nsec:\ ([0-9]+) ]]; then
         tv_secs="${BASH_REMATCH[1]}"
         tv_nsecs="${BASH_REMATCH[2]}"
