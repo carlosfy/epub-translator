@@ -5,6 +5,7 @@ pub mod xhtml;
 use crate::deepl::models::DeepLConfiguration;
 use crate::deepl::translate;
 
+use std::borrow::Borrow;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -20,7 +21,10 @@ use html5ever::tendril::StrTendril;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use markup5ever_rcdom::{Node, NodeData};
 use tempfile::tempdir;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    Semaphore,
+};
 
 #[macro_export]
 macro_rules! profiling_log {
@@ -47,6 +51,7 @@ macro_rules! timed {
     };
 }
 
+/// Translates an EPUB file and put the translation into another EPUB file.
 pub async fn translate_epub(
     input_file: &Path,
     output_file: &Path,
@@ -60,9 +65,11 @@ pub async fn translate_epub(
     let temp_dir = tempdir()?;
     let temp_dir_path = temp_dir.path();
 
-    // Translates the content of the EPUB file into a temporary directory
-    translate_epub_to_folder(
-        input_file,
+    // Unzips the epub to the output_dir
+    timed!(verbose, unzip_epub_from_path, input_file, temp_dir_path)?;
+
+    // Translates the folder in place. Only files that need to be translated will be modified
+    translate_folder(
         temp_dir_path,
         target_lang,
         source_lang,
@@ -78,35 +85,7 @@ pub async fn translate_epub(
     Ok(())
 }
 
-// Unzips an EPUB folder into it and translate its content.
-pub async fn translate_epub_to_folder(
-    input_file: &Path,
-    output_dir: &Path,
-    target_lang: String,
-    source_lang: Option<String>,
-    concurrent_requests: usize,
-    config: Vec<Arc<DeepLConfiguration>>,
-    verbose: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Unzips the epub to the output_dir
-    timed!(verbose, unzip_epub_from_path, input_file, output_dir)?;
-
-    // Translates the folder in place. Only files that need to be translated will be modified
-    translate_folder(
-        output_dir,
-        target_lang,
-        source_lang,
-        concurrent_requests,
-        config,
-        verbose,
-    )
-    .await?;
-
-    Ok(())
-}
-
-// Counts the number of characters to translate in an EPUB file
-// This could be done in parallel, but it's not a bottleneck
+/// Counts the number of characters to translate in an EPUB file.
 pub fn count_epub_char(epub_path: &Path) -> Result<usize, Box<dyn std::error::Error>> {
     // Create a temporary directory
     let temp_dir = tempdir()?;
@@ -134,24 +113,156 @@ pub fn count_epub_char(epub_path: &Path) -> Result<usize, Box<dyn std::error::Er
     Ok(counter)
 }
 
+/// Messages
 struct TranslationRequest {
     id: usize,
-    text: String,
+    text: Arc<String>,
 }
 
 struct TranslationResult {
     id: usize,
-    translated_text: Option<String>,
+    translated_text: Arc<Option<String>>,
 }
 
-// Translates the text content of all xhtml files of a folder
-// This is the core function
+/// Handles a single translation task asynchronously.
+///
+/// This function is designed to be thread-agnostic and lightweight, making it easily portable.
+/// It performs the following steps:
+/// 1. Acquires a permit from the semaphore to limit concurrent requests.
+/// 2. Calls the external translation API using the `translate` function.
+/// 3. Sends the translation result back to the writer through a channel.
+///
+/// # Error Handling
+/// - If translation fails, it logs the error and sends a result with `None` for the translated text.
+/// - If sending the result back to the writer fails, it logs the error.
+async fn translation_task(
+    id: usize,
+    text: Arc<String>,
+    target_lang: Arc<String>,
+    semaphore: Arc<Semaphore>,
+    tx_writer: Sender<TranslationResult>,
+    configuration: Arc<DeepLConfiguration>,
+    client: Client,
+) {
+    eprintln!("[{}] [Task] Start of translation id", id);
+    let out_permit = semaphore.acquire().await.unwrap();
+    let available_permits = semaphore.available_permits();
+    eprintln!(
+        "[{}] [Task] Took permit, remaining permits: {}",
+        id, available_permits
+    );
+    let translation_result = match translate(
+        &configuration,
+        &text,
+        &target_lang,
+        true,
+        &client,
+        id,
+        available_permits,
+    )
+    .await
+    {
+        Ok(translated_text) => {
+            // Drop permit
+            TranslationResult {
+                id: id,
+                translated_text: Arc::new(Some(translated_text)),
+            }
+        }
+        Err(error) => {
+            eprintln!("[{}] [Task] Error translating node: {}", id, error);
+            TranslationResult {
+                id: id,
+                translated_text: Arc::new(None),
+            }
+        }
+    };
+    drop(out_permit);
+
+    if let Err(e) = tx_writer.send(translation_result).await {
+        eprintln!("Failed to send translation result to writer: {}", e);
+    }
+    eprintln!("[{}] [Task] End of translation", id);
+}
+
+/// Spawns a Translator actor to manage translation tasks.
+///
+/// This function:
+/// 1. Receives translation requests via the receiver channel.
+/// 2. Spawns individual translation tasks for each request.
+/// 3. Individual translation tasks will send the result to the sender.
+/// 4. Manages concurrent requests using a semaphore.
+/// 5. Distributes tasks across multiple DeepL configurations.
+///
+/// Resources:
+/// 1. Client
+/// 2. Semaphore
+/// 3. Configurations
+///
+/// The actor continues running until the request channel is closed.
+async fn run_translator(
+    configurations: Vec<Arc<DeepLConfiguration>>,
+    concurrent_requests: usize,
+    target_lang: String,
+    mut receiver: Receiver<TranslationRequest>,
+    sender: Sender<TranslationResult>,
+) {
+    eprintln!("Created the translator");
+    let semaphore = Arc::new(Semaphore::new(concurrent_requests));
+    let target_lang = Arc::new(target_lang);
+    let client = Client::new();
+    let configuration_length = configurations.len();
+
+    while let Some(request) = receiver.recv().await {
+        eprintln!("[{}] - [Translator] Received request ", request.id);
+
+        let config_index = request.id % configuration_length;
+
+        let configuration = configurations[config_index].clone();
+        let client = client.clone();
+        let tx_writer = sender.clone();
+        let target_lang = target_lang.clone();
+        let semaphore = semaphore.clone();
+
+        let _task = tokio::spawn(translation_task(
+            request.id,
+            request.text,
+            target_lang,
+            semaphore,
+            tx_writer,
+            configuration,
+            client,
+        ));
+    }
+    eprintln!("[Translator] End, closing channel")
+}
+
+/// Core function: Translates text in all XHTML files within a folder
+///
+/// This function:
+/// 1. Creates document iterators, one per file, each as an HTML root.
+/// 2. Iterates through text nodes in each document.
+/// 3. Sets up two channels:
+///     - Translator_Channel (TranslationRequest)
+///     - Writer_Channel (TranslationResult)
+/// 4. Spawns Translator:
+///     - Listens on Translator_Channel, spawning TranslationTasks as needed
+/// 5. For each text node:
+///     - Sends a TranslationRequest to Translator
+/// 6. Spawns Writer:
+///     - Listens on Writer_Channel for TranslationResults
+///         - Modifies nodes if successful; retries if not (up to max attempts)
+///     - Closes channels when done (note: deadlock risk if incomplete)
+/// 7. Serializes documents back to files.
+///
+/// Note: Ideally, TranslationRequests would be sent post-Writer spawn, but this requires moving
+/// Writer (owner of nodes, Vec<Rc<Node>>) across threads.
 pub async fn translate_folder(
     dir_path: &Path,
     target_lang: String,
-    source_lang: Option<String>,
+    _source_lang: Option<String>,
     concurrent_requests: usize,
-    config: Vec<Arc<DeepLConfiguration>>,
+    configurations: Vec<Arc<DeepLConfiguration>>,
     verbose: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let max_retries = 4;
@@ -159,6 +270,7 @@ pub async fn translate_folder(
 
     let xhtml_files = get_xhtml_paths(dir_path)?;
 
+    // 1. Create document iterator
     let documents = xhtml_files
         .map(|file| {
             let file_path = PathBuf::from(file);
@@ -167,14 +279,14 @@ pub async fn translate_folder(
         })
         .collect::<Vec<(Rc<Node>, PathBuf)>>();
 
-    // Get all text nodes from all documents, having all together in the same iterator
-    // allows to parallelize across all documents, so more threads can be used.
+    // 2. Create text node iterator
+    // This approach enables parallelization across all documents,
     let nodes = documents
         .iter()
-        .flat_map(|(document, _)| get_text_nodes(&document).unwrap())
+        .flat_map(|(document, _)| get_text_nodes(&document).expect("Failed to get text nodes."))
         .collect::<Vec<Rc<Node>>>();
 
-    // let mut tasks = Vec::new();
+    let total_nodes = nodes.len();
 
     let end_preprocessing = Instant::now();
     let preprocessing_duration = end_preprocessing - start;
@@ -184,7 +296,11 @@ pub async fn translate_folder(
         preprocessing_duration
     );
 
-    let total_nodes = nodes.len();
+    eprintln!(
+        "[TRACE]{},{},{},{},{},{},{}",
+        "id", "len", "error_code", "start", "request_duration", "available_permits", "thread"
+    );
+
     // Create a progress bar
     let progress_bar =
         ProgressBar::with_draw_target(Some((total_nodes + 1) as u64), ProgressDrawTarget::stdout());
@@ -197,114 +313,69 @@ pub async fn translate_folder(
 
     progress_bar.inc(1);
 
+    // 3. Create Channels
     let writer_queue_size = 15_000;
 
-    let (tx_translator, mut rx_translator) = mpsc::channel::<TranslationRequest>(writer_queue_size);
+    let (tx_translator, rx_translator) = mpsc::channel::<TranslationRequest>(writer_queue_size);
     let (tx_writer, mut rx_writer) = mpsc::channel::<TranslationResult>(writer_queue_size);
-    // let tx_writer_for_translator = tx_writer.clone();
 
-    let target_lang = Arc::new(target_lang);
-    // let semaphore = Arc::new(Semaphore::new(concurrent_requests));
-    let _translator = tokio::spawn(async move {
-        // Move data to translator
-        let configurations = config;
+    // 4. Spawn a Translator
+    let _translator_handle = tokio::spawn(run_translator(
+        configurations,
+        concurrent_requests,
+        target_lang,
+        rx_translator,
+        tx_writer,
+    ));
 
-        let semaphore = Arc::new(Semaphore::new(concurrent_requests));
-        eprintln!("Created the translator");
-        let client = Client::new();
-        let tx_writer = tx_writer;
-
-        // Translator actor, receives TranslationRequests, translates and sends results to writer.
-        while let Some(request) = rx_translator.recv().await {
-            eprintln!("[{}] - [Translator] Received request ", request.id);
-            // let semaphore = semaphore.clone();
-            let client = client.clone();
-            let tx_writer = tx_writer.clone();
-
-            let config_index = request.id % configurations.len();
-            let configuration = configurations[config_index].clone();
-            let target_lang = target_lang.clone();
-
-            let semaphore = semaphore.clone();
-            let _task = tokio::spawn(async move {
-                eprintln!("[{}] [Task] Start of translation id", request.id);
-                let out_permit = semaphore.acquire().await.unwrap();
-                let remaining_permits = semaphore.available_permits();
-                eprintln!(
-                    "[{}] [Task] Took permit, remaining permits: {}",
-                    request.id, remaining_permits
-                );
-                // let _permit = semaphore.acquire().await.unwrap();
-                let translation_result = match translate(
-                    &configuration,
-                    &request.text,
-                    &target_lang,
-                    true,
-                    &client,
-                    request.id,
-                )
-                .await
-                {
-                    Ok(translated_text) => {
-                        // Drop permit
-                        TranslationResult {
-                            id: request.id,
-                            translated_text: Some(translated_text),
-                        }
-                    }
-                    Err(error) => {
-                        println!("[{}] [Task] Error translating node: {}", request.id, error);
-                        TranslationResult {
-                            id: request.id,
-                            translated_text: None,
-                        }
-                    }
-                };
-                drop(out_permit);
-
-                if let Err(e) = tx_writer.send(translation_result).await {
-                    eprintln!("Failed to send translation result to writer: {}", e);
-                }
-                eprintln!("[{}] [Task] End of translation", request.id);
-                // drop(out_permit);
-            });
-        }
-        eprintln!("[Translator] End of all task")
-    });
-
-    let mut completed = 0;
-
-    let texts_enumerated: Vec<(usize, String)> = nodes
+    let texts_enumerated: Vec<Arc<String>> = nodes
         .iter()
-        .enumerate()
-        .map(|(id, node)| {
+        .map(|node| {
             if let NodeData::Text { contents } = &node.data {
                 let text = contents.borrow().to_string();
-                (id, text)
+                Arc::new(text)
             } else {
-                (id, String::new())
+                Arc::new(String::new())
             }
         })
         .collect();
 
-    // Initial send of all requests
-    // Create first the translator, seems to fail when sending all before nobody is listening.
-    for (id, text) in texts_enumerated.iter() {
-        eprintln!("[{}] Sending request to Translator", id);
+    // 5. Send initial translation requests to the Translator
+    // Note: Ensure the Translator is created and listening before sending requests
+    // to avoid potential failures in message transmission
+    let mut completed = 0;
+    for (id, text) in texts_enumerated.iter().enumerate() {
+        eprintln!(
+            "[{}] NodeContent: |{}| Sending request to Translator",
+            id, &text
+        );
         if let Err(error) = tx_translator
             .send(TranslationRequest {
-                id: *id,
-                text: text.to_string(),
+                id: id,
+                text: text.clone(),
             })
             .await
         {
             eprintln!("[{}] Error sending message to translator: {}", id, error);
             completed += 1;
+            progress_bar.inc(1);
         };
     }
 
-    let mut retries: Vec<usize> = vec![0, total_nodes];
+    eprintln!("Total nodes: {}", total_nodes);
 
+    let mut retries: Vec<usize> = vec![0; total_nodes];
+
+    eprintln!("Actual retries length: {}", retries.len());
+
+    // 6. Spawn Writer
+    //
+    // Ressources:
+    // - Writer receiver `rx_writer`
+    // - Node reference `vector nodes` (Vec<Rc<Node>>)
+    // - Translator sender `tx_translator`
+    // - Progress counter `completed`
+    // - retries
     while let Some(TranslationResult {
         id,
         translated_text,
@@ -314,38 +385,41 @@ pub async fn translate_folder(
             "[{}] [Writer] Received: {}, Received result: {:?}",
             id, completed, translated_text
         );
-        if let Some(translated_text) = translated_text {
+        if let Some(translated_text) = translated_text.borrow() {
             if let NodeData::Text { contents } = &nodes[id].data {
                 let mut text = contents.borrow_mut();
-                *text = StrTendril::from(translated_text);
+                *text = StrTendril::from_slice(translated_text);
                 completed += 1;
                 progress_bar.inc(1);
             }
         } else {
+            eprintln!("Actual retries length before if: {}", retries.len());
             if retries[id] < max_retries {
                 retries[id] += 1;
-                let (id, text) = &texts_enumerated[id];
                 if let Err(error) = tx_translator
                     .send(TranslationRequest {
-                        id: *id,
-                        text: text.to_string(),
+                        id: id,
+                        text: texts_enumerated[id].clone(),
                     })
                     .await
                 {
                     eprintln!("[{}] Error sending message to translator: {}", id, error);
                     completed += 1;
+                    progress_bar.inc(1);
                 };
             } else {
                 completed += 1;
                 progress_bar.inc(1);
             }
         }
+        // Exit condition: All nodes have been processed
+        // Note: This breaks the loop to avoid a deadlock scenario
+        // TODO: Implement a more robust termination mechanism
         if completed == total_nodes {
+            eprintln!("END OF WRITER");
             break;
         }
     }
-
-    eprintln!("The Writer ended");
 
     progress_bar.finish_with_message("Translation completed");
 
@@ -353,6 +427,7 @@ pub async fn translate_folder(
     let translation_duration = end_translation - end_preprocessing;
     profiling_log!(verbose, "Translation duration: {:?}", translation_duration);
 
+    // 7. Serialize all documents
     for (document, path) in &documents {
         serialize_document(&document, &path)?;
     }

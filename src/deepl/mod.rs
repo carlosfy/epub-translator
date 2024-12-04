@@ -3,6 +3,7 @@ pub mod models;
 use reqwest::Client;
 use std::error::Error;
 use std::fs;
+use std::thread;
 
 use std::collections::HashMap;
 
@@ -15,6 +16,7 @@ use models::{
 use tokio::sync::oneshot;
 use tokio::time::sleep;
 use tokio::time::Duration;
+use tokio::time::Instant;
 
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 
@@ -38,7 +40,6 @@ macro_rules! mock_log {
     };
 }
 
-// TODO: Rewrite taking client as parameter
 // translate.sh
 pub async fn translate(
     config: &DeepLConfiguration,
@@ -47,6 +48,7 @@ pub async fn translate(
     verbose: bool,
     client: &Client,
     id: usize,
+    available_permits: usize,
 ) -> Result<String, Box<dyn Error>> {
     api_log!(
         verbose,
@@ -55,6 +57,8 @@ pub async fn translate(
         text,
         target_lang
     );
+    let thread = thread::current().id();
+    let len = text.len();
 
     let body = TranslationRequest {
         text: vec![text.to_string()],
@@ -69,17 +73,50 @@ pub async fn translate(
             format!("DeepL-Auth-Key {}", config.auth_key),
         );
 
-    let response: TranslationResponse = request.send().await?.json().await?;
-    let translated_text = response.translations[0].text.clone();
-    api_log!(
-        verbose,
-        "Translated to {}: |{}| -> |{}|",
-        target_lang,
-        text,
-        &translated_text
-    );
+    let start = Instant::now();
+    let response_ = match request.send().await {
+        Ok(resp) => {
+            let request_duration = start.elapsed().as_nanos();
+            match resp.json::<TranslationResponse>().await {
+                Ok(data) => {
+                    let error_code = 0;
+                    let translated_text = data.translations[0].text.clone();
+                    eprintln!(
+                        "[TRACE]{},{},{},{:?},{},{},{:?}",
+                        id, len, error_code, start, request_duration, available_permits, thread
+                    );
+                    api_log!(
+                        verbose,
+                        "Translated to {}: |{}| -> |{}|",
+                        target_lang,
+                        text,
+                        &translated_text
+                    );
+                    Ok(translated_text)
+                }
+                Err(e) => {
+                    let error_code = 2; // Parsing failed
+                    eprintln!(
+                        "[TRACE]{},{},{},{:?},{},{},{:?}",
+                        id, len, error_code, start, request_duration, available_permits, thread
+                    );
 
-    Ok(translated_text)
+                    Err(e)
+                }
+            }
+        }
+        Err(e) => {
+            let request_duration = start.elapsed().as_nanos();
+            let error_code = 1; // Call failed
+            eprintln!(
+                "[TRACE]{},{},{},{:?},{},{},{:?}",
+                id, len, error_code, start, request_duration, available_permits, thread
+            );
+            Err(e)
+        }
+    };
+
+    Ok(response_?)
 }
 
 // usage.sh
@@ -215,7 +252,7 @@ mod tests {
 
         let client = Client::new();
 
-        let translate_result = translate(&config, "Hello", "ES", true, &client, 0).await?;
+        let translate_result = translate(&config, "Hello", "ES", true, &client, 0, 0).await?;
         let usage_result = get_usage(&config, true).await?;
         let languages_result = get_languages(&config, true).await?;
 

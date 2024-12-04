@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let permits_available = semaphore.available_permits();
             println!("Permits available: {}, thread: {}", permits_available, i);
-            deepl::translate(&config, &TEXT_TO_TRANSLATE, "ES", true, &client, i)
+            deepl::translate(&config, &TEXT_TO_TRANSLATE, "ES", true, &client, i, 0)
                 .await
                 .ok()
         });

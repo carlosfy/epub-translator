@@ -30,7 +30,7 @@ struct Args {
     source_lang: Option<String>,
 
     /// Number of parallel translation requests (default: 1)
-    #[arg(short, long, default_value_t = 1)]
+    #[arg(short, long, default_value_t = 400)]
     parallel: usize,
 
     /// DeepL API key (optional, defaults to DEEPL_API_KEY environment variable)
@@ -224,6 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let total_duration = start.elapsed();
     profiling_log!(args.verbose, "Total duration: {:?}", total_duration);
+    eprintln!("End");
 
     // Shutdown mock server if test mode
     if let Some(signal) = shutdown_mock_server_signal {
